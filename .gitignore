@@ -17,3 +17,6 @@ tmp/
 .vscode/
 .idea/
 *.swp
+
+# Changelog
+CHANGELOG.md
