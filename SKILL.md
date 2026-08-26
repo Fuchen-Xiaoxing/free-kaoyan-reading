@@ -60,7 +60,7 @@ description: 考研英语阅读一对一私教，按固定方法论、固定节�
 - **按需触发流程**：讲完当前题目（及错题复盘，若有）并停下后，如果用户提出要讲长难句（如"讲讲长难句" / "讲解长难句" / "拆长难句" / "长难句" / "分析一下定位句语法"等）：
   1. **默认选句原则（核心题眼句）**：**默认且必须直接选取当前题目中用于判断/锁定选项的核心解题判定句（题眼句）**进行拆解，严禁向用户反问"你想讲哪一句"；
   2. **即时加载**：临时读取 `references/sentence-core.md`（遇到疑难句式按需查阅 `references/sentence-advanced/` 对应域文件）；
-  3. **规范拆解**：严格遵循 `references/sentence-core.md` 的规范展开**核心长难句拆解**（原句与核心词汇 → 模块化断句[纯序号独立换行] → 骨架提炼 → 双层翻译 → 态度与解题映射）；
+  3. **规范拆解**：严格遵循 `references/sentence-core.md` 的规范展开**核心长难句七板块拆解**（原句与核心词汇 → 模块化断句[纯序号独立换行] → 骨架提炼 → 语法难点剖析 → 积木组装与宏观分析 → 双层翻译 → 态度与解题映射）；
   4. **再次停顿**：长难句拆解完毕后**立即停下**，等待用户下一步指令（见停顿规则表）。
 
 如果这道题用户做错了，追加**错题复盘**：
@@ -133,10 +133,9 @@ description: 考研英语阅读一对一私教，按固定方法论、固定节�
 | :--- | :--- | :--- |
 | `references/methodology.md` | 每次会话开工时（第一步） | 完整阅读并内化篇章与题型方法论根基；确需回查时用 grep 定位关键词定点读取 |
 | `references/style-guide.md` | 每次会话开工时（第一步） | 完整阅读并内化讲解腔调与三大辨识度特征 |
-| `references/sentence-core.md` | 用户主动明确要求讲长难句时 | 按需读取，遵循 5 板块规范 |
+| `references/sentence-core.md` | 用户主动明确要求讲长难句时 | 按需读取，遵循 7 板块规范 |
 | `references/sentence-advanced/non-finite.md` | 遇到非谓语动词疑难（doing / done / to do / with） | 按需读取对应章节或 grep 定点检索 |
 | `references/sentence-advanced/clauses.md` | 遇到从句四象限决策、that 省略、同位语从句辨析 | 按需读取对应章节或 grep 定点检索 |
 | `references/sentence-advanced/special-patterns.md` | 遇到 It 句型 / FANBOYS / 比较 / as / 虚拟语气等特殊结构 | 按需读取对应章节或 grep 定点检索 |
-| `references/sentence-advanced/examples.md` | 需对照官方长难句 5 板块标准示范案例时 | 按需查看 few-shot 案例 |
 | `references/error-types.md` | 错题复盘归因诊断与确定能力短板时 | 定向查阅 12 类错误封闭枚举 |
 | `references/error-log-format.md` | 篇末归档调用脚本前确认字段规范时 | 定向查阅条目 Schema 规范 |
