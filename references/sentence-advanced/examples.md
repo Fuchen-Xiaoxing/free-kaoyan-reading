@@ -21,12 +21,12 @@
 > - `be addicted to` adj. 上瘾的，沉迷的（负态度词）
 
 ### 【板块二：模块化断句与结构积木】
-- **断句切分（逐块换行展示，仅分句积木英语采用 LaTeX 格式）**：
-  - `[1]` $\text{This tendency}$
-  - `[2]` $\text{to slow down}$
-  - `[3]` $\text{when decisions are risky}$
-  - `[4]` $\text{might also help explain}$
-  - `[5]` $\text{why women are less likely to become addicted than men.}$
+- **断句切分（逐块换行展示）**：
+  - `[1]` This tendency
+  - `[2]` to slow down
+  - `[3]` when decisions are risky
+  - `[4]` might also help explain
+  - `[5]` why women are less likely to become addicted than men.
 - **积木属性剖析**：
   - **[1]**：主句核心主语名词（*This tendency*）；
   - **[2]**：不定式短语作后置定语，修饰 tendency；
@@ -59,13 +59,13 @@
 > - `widen one's view` 拓宽某人的视野（高分表达，淘汰 broaden horizons）
 
 ### 【板块二：模块化断句与结构积木】
-- **断句切分（逐块换行展示，仅分句积木英语采用 LaTeX 格式）**：
-  - `[1]` $\text{Though he acknowledges}$
-  - `[2]` $\text{that engineering works can fail}$
-  - `[3]` $\text{because the person who thought them up got things wrong,}$
-  - `[4]` $\text{in this book Dr. P widens his view}$
-  - `[5]` $\text{to consider the larger context}$
-  - `[6]` $\text{in which such failures occur.}$
+- **断句切分（逐块换行展示）**：
+  - `[1]` Though he acknowledges
+  - `[2]` that engineering works can fail
+  - `[3]` because the person who thought them up got things wrong,
+  - `[4]` in this book Dr. P widens his view
+  - `[5]` to consider the larger context
+  - `[6]` in which such failures occur.
 - **积木属性剖析**：
   - **[1]~[3]**：`Though` 引导的让步状语从句群（内含 that 宾从、because 原因从句及 who 定从嵌套）；
   - **[4]**：主句核心主谓宾（*Dr. P widens his view*）；
@@ -96,12 +96,12 @@
 > - `manage` vt. 管理，妥善应对，维持
 
 ### 【板块二：模块化断句与结构积木】
-- **断句切分（逐块换行展示，仅分句积木英语采用 LaTeX 格式）**：
-  - `[1]` $\text{It is our hope}$
-  - `[2]` $\text{that in coming decades,}$
-  - `[3]` $\text{advances in science will offer new perspectives}$
-  - `[4]` $\text{from which to study}$
-  - `[5]` $\text{how people manage their lives.}$
+- **断句切分（逐块换行展示）**：
+  - `[1]` It is our hope
+  - `[2]` that in coming decades,
+  - `[3]` advances in science will offer new perspectives
+  - `[4]` from which to study
+  - `[5]` how people manage their lives.
 - **积木属性剖析**：
   - **[1]**：主句形式主语结构（*It is our hope*）；
   - **[2]**：时间状语插入语（*in coming decades*）；

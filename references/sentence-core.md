@@ -165,11 +165,10 @@ $$\textbf{重要位置} \quad\Big|\quad \textbf{重点标志} \quad\Big|\quad \t
 为确保 AI 讲师在解题辅导中对长难句进行规范、深入、实战化、易于阅读的拆解，特制定**五大标准板块输出模板**。
 
 > [!IMPORTANT]
-> **长难句拆解四大执行铁律**：
+> **长难句拆解三大执行铁律**：
 > 1. **默认选句原则**：讲解的长难句**默认且必须是当前题目中用于判断和锁定选项的核心解题判定句（题眼句）**；当用户提出"讲解长难句"时，默认直接拆解该题核心句，严禁向用户反问。
 > 2. **极简注释原则**：遵循 style-guide.md 规范，直接给出单词 + 词性 + 考研核心释义 + 态度色彩，杜绝视觉冗余（坚守零音标原则）。
 > 3. **积木逐行换行与纯编号原则**：【板块二：模块化断句与结构积木】中，**每个积木块必须独立占一行展示**，严禁将整句积木堆叠在一行内；积木标签**仅保留纯序号 `[1]`、`[2]`...，严禁添加冗杂中文标签**。
-> 4. **仅分句积木采用 LaTeX 格式**：**仅在【板块二】断句切分的分句积木英文采用 LaTeX 格式（如 `$\text{...}$`）输出**；其他板块（原句、单词词性、核心骨架等）均使用标准纯文本/Markdown 格式，不使用 LaTeX。
 
 ### 标准化长难句 5 板块输出模板
 
@@ -181,11 +180,11 @@ $$\textbf{重要位置} \quad\Big|\quad \textbf{重点标志} \quad\Big|\quad \t
 > - `word 2` adj./adv. 考研核心释义（逻辑态度色彩）
 
 #### 【板块二：模块化断句与结构积木】
-- **断句切分（逐块换行，保留纯编号，仅分句积木英语采用 LaTeX 格式）**：
-  - `[1]` $\text{In recent years,...}$
-  - `[2]` $\text{scientists have discovered...}$
-  - `[3]` $\text{that our brain structure changes...}$
-  - `[4]` $\text{which can influence daily decisions.}$
+- **断句切分（逐块换行，保留纯编号）**：
+  - `[1]` In recent years,...
+  - `[2]` scientists have discovered...
+  - `[3]` that our brain structure changes...
+  - `[4]` which can influence daily decisions.
 - **积木属性剖析**：
   - **[1]**：时间状语介词短语，交代研究背景；
   - **[2]**：主句核心主谓（落单谓语动词 have discovered）；
