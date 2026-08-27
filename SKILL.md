@@ -84,7 +84,7 @@ description: 考研英语阅读一对一私教，按固定方法论、固定节�
 ### 阶段 3：收尾双询问（依次进行）
 
 **询问 1：是否记录错题？**
-- 确认后，将本篇所有错题数据写入临时 JSON 文件，直接调用 `python scripts/record_error.py --file 错题本.md --json <临时JSON文件路径>` 一次性**批量追加**到 `错题本.md`（只追加、不覆盖历史条目；规范见脚本契约与 `references/error-log-format.md`）。在正文中向用户反馈记录成功提示与追加的条目 ID。
+- 确认后，将本篇所有错题数据写入临时 JSON 文件，直接调用 `python scripts/record_error.py --file 错题本.md --json <临时JSON文件路径>` 一次性**批量追加**到 `错题本.md`（只追加、不覆盖历史条目；命令与 Schema 见 `references/script-contracts.md`，条目规范见 `references/error-log-format.md`）。在正文中向用户反馈记录成功提示与追加的条目 ID。
 - 本篇全对则跳过此询问。
 
 **询问 2：是否总结本篇核心单词与词组？**
@@ -125,7 +125,7 @@ description: 考研英语阅读一对一私教，按固定方法论、固定节�
 
 ## 工程约束与错题规范
 
-- **【严禁查阅脚本源码】**：正式脚本已在「脚本接口与调用契约」中完整定义其命令格式、参数与 JSON Schema。AI 必须直接按契约构造 JSON 和调用命令行，**绝对禁止调用 view_file 或 grep_search 查看 scripts/ 目录下的 Python 源码**（避免无谓消耗上下文）。只有脚本报错且 stderr 无法定位时，才允许定点查看报错位置。
+- **【严禁查阅脚本源码】**：正式脚本已在 `references/script-contracts.md`（脚本接口与调用契约）中完整定义其命令格式、参数与 JSON Schema。AI 必须直接按契约构造 JSON 和调用命令行，**绝对禁止调用 view_file 或 grep_search 查看 scripts/ 目录下的 Python 源码**（避免无谓消耗上下文）。只有脚本报错且 stderr 无法定位时，才允许定点查看报错位置。
 - **【词汇表格与报告透明】**：阶段三导出的 Markdown 词汇表格和墨墨导入分类报告必须 100% 完整呈现在与用户的回复正文中，严禁仅在后台运行或静默完成。
 - **错题存储与追加**：`错题本.md`（默认在本 skill 目录下），篇末确认后统一调用 `scripts/record_error.py` 传入本篇错题 JSON 数组**批量追加**（只追加、不覆盖、禁止手工拼写）。
 - **错误标准与 Schema**：错误类型与能力短板严格遵循 `references/error-types.md` 规范，条目格式遵循 `references/error-log-format.md`。
@@ -134,57 +134,11 @@ description: 考研英语阅读一对一私教，按固定方法论、固定节�
 - **题目数量兼容**：总结触发条件是"全部题目讲完后"，不硬编码题数。
 - **运行时垃圾管理与彻底清理**：讲解过程中产生的词汇 JSON、错题 JSON、API 响应、调试日志及一次性脚本，统一写入系统临时目录或 `tmp/free-kaoyan-reading/<本篇唯一ID>/`，禁止写入 skill 根目录及 scripts/。优先调用正式脚本，禁止临时手写脚本。阶段三（错题归档与词汇导入）全部完成后，**必须立即彻底删除临时目录及空的父级目录（如 `rm -rf /tmp/free-kaoyan-reading` 或清空临时文件），确保零垃圾残留且不误报**。API Token、请求头和完整响应不得落盘。
 
-## 脚本接口与调用契约（无需查阅脚本源码）
+## 脚本接口与调用契约（按需加载）
 
-> ⚠️ **【强约束】AI 严禁调用 view_file 查看 scripts/ 目录下的 Python 源码文件。所有脚本调用方式、参数和 JSON Schema 完全以本节契约规范为准，直接构造 JSON 与执行命令。**
+完整契约（命令格式、JSON Schema、枚举约束、字段别名、功能特性）统一存放于 **`references/script-contracts.md`**，仅在阶段 3 调用脚本前按需加载；日常讲题（阶段 0-2）无需加载，保持上下文精简。
 
-### 1. 词汇表格导出：`scripts/vocab_export.py`
-- **命令格式**：`python scripts/vocab_export.py --json <JSON文件路径或JSON字符串> [--format markdown|json]`
-- **功能特性**：自动去重（忽略大小写）、强制限制 ≤30 个词条（超出自动截断），默认以 Markdown 表格输出至 stdout。
-- **输入 JSON Schema**（词汇对象数组）：
-  ```json
-  [
-    {
-      "word": "单词或词组 (如 transparent)",
-      "meaning": "文中释义 (如 透明的；易懂的)",
-      "tone": "态度色彩 (如 正 / 负 / 中性 / 讽刺)",
-      "source": "出处 (如 Q21 题干 / Q23 选项 B / Q24 定位关键句)"
-    }
-  ]
-  ```
-- **输出**：stdout 打印标准 Markdown 表格（表头：`| # | 单词 / 词组 | 文中释义 | 态度色彩 | 出处 |`）。
-
-### 2. 墨墨背单词一键导入：`scripts/memo_import.py`
-- **命令格式**：`python scripts/memo_import.py --json <JSON文件路径或JSON字符串> [--dry-run] [--format text|json]`
-- **Token 机制**：自动从环境变量 `MAIMEMOTOKEN` 或 `MAIMEMO_TOKEN` 读取，无需显式传 `--token`。
-- **功能特性**：自动查询 `voc_id`，未收录短语自动拆分为单词兜底解析，比对已有学习记录后自动将新词添加待背、旧词提升提前复习。用户审阅确认表格后，**直接执行正式导入**（无需在 live 对话中多跑一次 `--dry-run` 浪费轮次）。
-- **输入 JSON Schema**：与 `vocab_export.py` 输入格式完全一致（直接传入同一个 JSON 文件即可）。
-- **输出**：stdout 打印分类统计报告（包含新加待背、提前复习、词组拆分明细、无法识别及统计汇总）。
-
-### 3. 错题本批量归档：`scripts/record_error.py`
-- **命令格式**：`python scripts/record_error.py --file 错题本.md --json <JSON文件路径或JSON字符串>`
-- **功能特性**：ID 自动去重递增、12 类错误类型与能力短板严格校验、YAML frontmatter + 正文格式批量追加至 `错题本.md`（只追加、不覆盖）。脚本内置宽容度别名映射（如兼容 `type`/`shortboard`/`body` 等简写键名）。
-- **输入 JSON Schema**（错题对象数组）：
-  ```json
-  [
-    {
-      "id": "2009-T4-Q21",
-      "question_type": "细节题",
-      "error_type": "无对应内容",
-      "ability_shortboard": "词汇",
-      "keyword": "题干定位词或核心切入点",
-      "location": "原文定位 (如 L12-13)",
-      "restore": "错误还原 (用户自述思路 + 诊断思维误区)",
-      "attribution": "方法论归因 (违背/忽略的原则)",
-      "lesson": "教训金句 (一句话前瞻策略)",
-      "analysis": "详细复盘正文"
-    }
-  ]
-  ```
-- **字段别名兼容**：`question_type` (支持 `type`/`题型`), `ability_shortboard` (支持 `shortboard`/`ability`/`能力短板`), `error_type` (支持 `error`/`错误类型`), `analysis` (支持 `body`/`content`/`正文`)。
-- **枚举约束**：
-  - `error_type` 必须严格属于 12 类之一：`定位错误`、`无对应内容`、`过度推理`、`偷换概念/嫁接`、`因果倒置`、`态度背离`、`细节背离主旨`、`绝对化误选`、`审题不清`、`比较/时态偷换`、`词义误解`、`长难句误读`。
-  - `ability_shortboard` 必须严格属于：`词汇`、`语法`、`主旨` 之一。
+> ⚠️ **【强约束】AI 严禁调用 view_file / grep 查看 `scripts/` 目录下的 Python 源码文件。所有脚本调用方式、参数和 JSON Schema 完全以 `references/script-contracts.md` 契约为准，直接构造 JSON 与执行命令行。只有脚本报错且 stderr 无法定位时，才允许定点查看报错位置。**
 
 ## 参考文件与按需加载总表
 
@@ -198,3 +152,4 @@ description: 考研英语阅读一对一私教，按固定方法论、固定节�
 | `references/sentence-advanced/special-patterns.md` | 遇到 It 句型 / FANBOYS / 比较 / as / 虚拟语气等特殊结构 | 按需读取对应章节或 grep 定点检索 |
 | `references/error-types.md` | 错题复盘归因诊断与确定能力短板时 | 定向查阅 12 类错误封闭枚举 |
 | `references/error-log-format.md` | 篇末归档调用脚本前确认字段规范时 | 定向查阅条目 Schema 规范 |
+| `references/script-contracts.md` | 阶段 3 调用脚本（错题归档 / 词汇导出 / 墨墨导入）前 | 按需读取，直接按契约构造 JSON 与命令行，严禁查看 scripts/ 源码 |
