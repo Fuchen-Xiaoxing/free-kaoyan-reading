@@ -59,3 +59,6 @@ error_type: 无对应内容
 ]
 ```
 
+*(注：脚本已内置键名宽容别名映射，`question_type` 支持 `type`/`题型`，`ability_shortboard` 支持 `shortboard`/`ability`/`能力短板`，`error_type` 支持 `error`/`错误类型`，`analysis` 支持 `body`/`content`/`正文`)*
+
+

@@ -59,30 +59,38 @@ def generate_unique_id(base_id, existing_ids):
         index += 1
     return f"{base_id}-{index}"
 
+def _get_field(data, keys, default=""):
+    for k in keys:
+        if k in data and data[k] is not None:
+            val = str(data[k]).strip()
+            if val:
+                return val
+    return default
+
 def format_error_entry(data, existing_ids):
-    # 校验错误类型
-    error_type = data.get("error_type", data.get("错误类型", "")).strip()
+    # 校验错误类型（支持多种常见别名）
+    error_type = _get_field(data, ["error_type", "error", "type_of_error", "错误类型"])
     if error_type not in ERROR_TYPES:
         print(f"[ERROR] 非法错误类型: '{error_type}'。必须严格属于 12 类封闭枚举之一：\n{', '.join(ERROR_TYPES)}", file=sys.stderr)
         sys.exit(1)
 
-    # 校验能力短板
-    shortboard = data.get("ability_shortboard", data.get("能力短板", "")).strip()
+    # 校验能力短板（支持多种常见别名）
+    shortboard = _get_field(data, ["ability_shortboard", "shortboard", "ability", "能力短板"])
     if shortboard not in ABILITY_SHORTBOARDS:
         print(f"[ERROR] 非法能力短板: '{shortboard}'。必须属于 {ABILITY_SHORTBOARDS} 之一", file=sys.stderr)
         sys.exit(1)
 
-    base_id = data.get("id", data.get("ID", "UNKNOWN-Q0")).strip()
+    base_id = _get_field(data, ["id", "ID", "item_id"], "UNKNOWN-Q0")
     entry_id = generate_unique_id(base_id, existing_ids)
     existing_ids.add(entry_id)
 
-    q_type = data.get("question_type", data.get("题型", "细节题")).strip()
-    keyword = data.get("keyword", data.get("解题关键词", "")).strip()
-    location = data.get("location", data.get("原文定位", "")).strip()
-    restore = data.get("restore", data.get("错误还原", "")).strip()
-    attribution = data.get("attribution", data.get("方法论归因", "")).strip()
-    lesson = data.get("lesson", data.get("教训金句", "")).strip()
-    analysis = data.get("analysis", data.get("正文", "")).strip()
+    q_type = _get_field(data, ["question_type", "type", "q_type", "题型"], "细节题")
+    keyword = _get_field(data, ["keyword", "keywords", "key", "解题关键词"])
+    location = _get_field(data, ["location", "loc", "原文定位"])
+    restore = _get_field(data, ["restore", "thought", "错误还原"])
+    attribution = _get_field(data, ["attribution", "attr", "方法论归因"])
+    lesson = _get_field(data, ["lesson", "takeaway", "教训金句"])
+    analysis = _get_field(data, ["analysis", "body", "content", "正文"])
     if not analysis:
         analysis = f"错误还原：{restore}\n方法论归因：{attribution}\n教训金句：{lesson}"
 
