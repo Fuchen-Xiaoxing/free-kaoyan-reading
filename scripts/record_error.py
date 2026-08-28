@@ -4,6 +4,7 @@
 record_error.py - 考研英语阅读错题记录脚本
 将错题以 YAML frontmatter + 正文格式只追加写入错题本.md
 支持单条与批量 (JSON 数组) 追加、ID 自动去重递增与 12 类错误枚举/能力短板校验。
+归档成功后默认自动删除输入 JSON 临时文件（--keep-json 可保留），并尝试清理因此变空的临时父目录（最多向上两级，仅删空目录），无需调用方手动清理。
 """
 
 import sys
@@ -152,6 +153,33 @@ def append_errors(file_path, items):
 
     return added_ids
 
+def cleanup_input_file(path: str) -> bool:
+    """
+    归档成功后清理输入 JSON 临时文件：删除文件本身，并尝试删除因此变空的临时父目录
+    （最多向上两级，仅当目录为空时删除；绝不触碰当前工作目录及更上层）。
+    清理失败静默忽略，不影响归档结果。返回是否删除了文件本身。
+    """
+    try:
+        p = os.path.abspath(path)
+        if not os.path.isfile(p):
+            return False
+        os.remove(p)
+        parent = os.path.dirname(p)
+        cwd = os.path.abspath(os.getcwd())
+        for _ in range(2):
+            # 到达工作目录或文件系统根时停止，只清理专属临时子目录
+            if parent == cwd or os.path.dirname(parent) == parent:
+                break
+            try:
+                os.rmdir(parent)  # 仅当目录为空时成功，非空抛 OSError
+            except OSError:
+                break
+            parent = os.path.dirname(parent)
+        return True
+    except OSError:
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(description="考研英语阅读错题批量/单条追加记录工具")
     parser.add_argument("--file", default=DEFAULT_FILE, help="错题本文件路径（默认: 错题本.md）")
@@ -166,6 +194,7 @@ def main():
     parser.add_argument("--attribution", default="", help="方法论归因")
     parser.add_argument("--lesson", default="", help="教训金句")
     parser.add_argument("--analysis", default="", help="详细复盘正文")
+    parser.add_argument("--keep-json", dest="keep_json", action="store_true", help="归档成功后保留输入 JSON 文件（默认自动删除临时输入文件及其变空的父目录）")
 
     args = parser.parse_args()
 
@@ -216,6 +245,12 @@ def main():
             }]
 
     append_errors(args.file, items)
+
+    # 归档成功后自动清理临时输入文件（--keep-json 例外）
+    if (not args.keep_json and args.json_input
+            and os.path.isfile(args.json_input)):
+        if cleanup_input_file(args.json_input):
+            print(f"[CLEANUP] 已自动清理临时输入文件: {os.path.abspath(args.json_input)}")
 
 if __name__ == "__main__":
     main()

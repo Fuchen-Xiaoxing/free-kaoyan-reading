@@ -10,8 +10,10 @@ memo_import.py - 考研英语核心词汇墨墨背单词自动化导入脚本
 4. 查询学习记录，自动状态分流：
    - 不在学习计划 -> 调用 /study/add_words 添加至待背队列 (advance=false)；
    - 已在学习计划 -> 调用 /study/advance_study 设置为提前复习。
-5. 结束后输出分类报告（新加待背 / 提前复习 / 词组拆出的单词 / 无法识别）。
-6. 支持 --dry-run 预览模式；Token 缺失或接口异常清晰报错退出，不静默失败。
+5. 词组拆分时自动过滤英语虚词（the/of/to 等停用词），避免虚词污染学习队列，报告中单列跳过明细。
+6. 结束后输出分类报告（新加待背 / 提前复习 / 词组拆出的单词 / 跳过虚词 / 无法识别）。
+7. 支持 --dry-run 预览模式；Token 缺失或接口异常清晰报错退出，不静默失败。
+8. 正式导入成功后默认自动删除输入 JSON 临时文件（--keep-json 可保留），并尝试清理因此变空的临时父目录（最多向上两级，仅删空目录），无需调用方手动清理。
 """
 
 import sys
@@ -32,6 +34,26 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
 
 BASE_URL = "https://open.maimemo.com/open/api/v1"
 TIMEOUT_SECONDS = 15
+
+# 词组拆分兜底时跳过的英语虚词（冠词/介词/连词/代词/系动词/助动词等）。
+# 这些词不构成词汇学习价值，禁止进入墨墨查询与导入，避免污染学习队列。
+PHRASE_STOPWORDS = {
+    # 冠词
+    "a", "an", "the",
+    # 连词
+    "and", "or", "but", "nor", "so", "yet",
+    # 介词
+    "of", "to", "in", "on", "at", "by", "for", "with", "from", "as",
+    "into", "onto", "upon", "about", "over", "under", "up", "down",
+    "out", "off", "than", "that",
+    # 代词（含所有格）
+    "it", "its", "this", "these", "those", "one's",
+    "i", "me", "my", "we", "our", "you", "your",
+    "he", "him", "his", "she", "her", "they", "them", "their",
+    # 系动词 / 助动词
+    "is", "are", "was", "were", "be", "been", "being", "am",
+    "do", "does", "did", "has", "had", "have",
+}
 
 
 class MaiMemoAPIError(Exception):
@@ -126,19 +148,28 @@ def parse_input_vocab(raw_input) -> list:
     return terms
 
 
-def split_phrase_into_words(phrase: str) -> list:
+def split_phrase_into_words(phrase: str) -> tuple:
     """
-    将未直接收录的短语拆解为单个单词（过滤标点符号）
+    将未直接收录的短语拆解为单个单词。
+    过滤标点符号与虚词（PHRASE_STOPWORDS），返回 (实义词列表, 跳过的虚词列表)。
     """
     words = re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", phrase)
     cleaned = []
+    skipped = []
     seen = set()
     for w in words:
         w_clean = w.strip()
-        if w_clean and w_clean.lower() not in seen:
-            seen.add(w_clean.lower())
+        if not w_clean:
+            continue
+        w_key = w_clean.lower()
+        if w_key in seen:
+            continue
+        seen.add(w_key)
+        if w_key in PHRASE_STOPWORDS:
+            skipped.append(w_clean)
+        else:
             cleaned.append(w_clean)
-    return cleaned
+    return cleaned, skipped
 
 
 def resolve_vocabularies(terms: list, token: str) -> tuple:
@@ -149,14 +180,16 @@ def resolve_vocabularies(terms: list, token: str) -> tuple:
       phrase_splits: {phrase: [word1, word2, ...]}
       split_matches: {word: voc_id}
       unrecognized: [unmatched_single_words or failed_split_words]
+      phrase_stopwords: {phrase: [skipped_stopword1, ...]} 拆分时跳过的虚词
     """
     direct_matches = {}
     phrase_splits = {}
     split_matches = {}
     unrecognized = []
+    phrase_stopwords = {}
 
     if not terms:
-        return direct_matches, phrase_splits, split_matches, unrecognized
+        return direct_matches, phrase_splits, split_matches, unrecognized, phrase_stopwords
 
     # 1. 批量查询第一批（所有原形词条，包含整句短语）
     # 同时提交原形和全小写以提升命中率
@@ -182,12 +215,17 @@ def resolve_vocabularies(terms: list, token: str) -> tuple:
         else:
             unmatched_terms.append(t)
 
-    # 2. 对未命中的词条进行分类：是短语则拆分，是单字则归入无法识别
+    # 2. 对未命中的词条进行分类：是短语则拆分（过滤虚词），是单字则归入无法识别
     words_to_query = set()
     for t in unmatched_terms:
-        # 判断是否包含多个单词
-        words = split_phrase_into_words(t)
-        if len(words) > 1:
+        words, skipped = split_phrase_into_words(t)
+        raw_token_count = len(re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", t))
+        if raw_token_count > 1:
+            if skipped:
+                phrase_stopwords[t] = skipped
+            if not words:
+                # 词组全部由虚词构成，无实义词可查，整条跳过
+                continue
             phrase_splits[t] = words
             for w in words:
                 w_key = w.lower()
@@ -217,7 +255,7 @@ def resolve_vocabularies(terms: list, token: str) -> tuple:
                     if w not in unrecognized:
                         unrecognized.append(w)
 
-    return direct_matches, phrase_splits, split_matches, unrecognized
+    return direct_matches, phrase_splits, split_matches, unrecognized, phrase_stopwords
 
 
 def partition_and_import(direct_matches: dict, phrase_splits: dict, split_matches: dict, token: str, dry_run: bool = False) -> dict:
@@ -281,10 +319,12 @@ def partition_and_import(direct_matches: dict, phrase_splits: dict, split_matche
 
 
 def format_report_text(direct_matches: dict, phrase_splits: dict, split_matches: dict, 
-                       unrecognized: list, result: dict, dry_run: bool) -> str:
+                       unrecognized: list, result: dict, dry_run: bool,
+                       phrase_stopwords: dict = None) -> str:
     """
     格式化生成清晰的控制台 Markdown/文本分类报告
     """
+    phrase_stopwords = phrase_stopwords or {}
     new_add_vids = result["new_add_voc_ids"]
     advance_vids = result["advance_voc_ids"]
 
@@ -352,7 +392,17 @@ def format_report_text(direct_matches: dict, phrase_splits: dict, split_matches:
                 else:
                     st = "未识别"
                 breakdowns.append(f"{w} [{st}]")
-            lines.append(f"  • \"{phrase}\" (未整句收录) → 拆分解析: {', '.join(breakdowns)}")
+            suffix = ""
+            if phrase in phrase_stopwords:
+                suffix = f"（已跳过虚词: {', '.join(phrase_stopwords[phrase])}）"
+            lines.append(f"  • \"{phrase}\" (未整句收录) → 拆分解析: {', '.join(breakdowns)}{suffix}")
+
+    # 3.5 全虚词词组（无实义词，整条跳过）
+    all_stopword_phrases = [p for p in phrase_stopwords if p not in phrase_splits]
+    if all_stopword_phrases:
+        lines.append(f"\n⏭️ 整条跳过的纯虚词词组 ({len(all_stopword_phrases)} 个):")
+        for p in all_stopword_phrases:
+            lines.append(f"  • \"{p}\" → 全部为虚词，不导入")
 
     # 4. 无法识别
     lines.append(f"\n❌ 无法识别 ({len(unrecognized)} 个):")
@@ -363,18 +413,21 @@ def format_report_text(direct_matches: dict, phrase_splits: dict, split_matches:
         lines.append("  (无)")
 
     # 汇总条
+    skipped_count = sum(len(v) for v in phrase_stopwords.values())
     lines.append("\n" + "-" * 46)
-    lines.append(f"📊 汇总统计: 新加待背 {total_new} | 提前复习 {total_advance} | 拆分词组 {len(phrase_splits)} | 无法识别 {len(unrecognized)}")
+    lines.append(f"📊 汇总统计: 新加待背 {total_new} | 提前复习 {total_advance} | 拆分词组 {len(phrase_splits)} | 跳过虚词 {skipped_count} | 无法识别 {len(unrecognized)}")
     lines.append("=" * 46)
 
     return "\n".join(lines)
 
 
 def format_report_json(direct_matches: dict, phrase_splits: dict, split_matches: dict, 
-                       unrecognized: list, result: dict, dry_run: bool) -> str:
+                       unrecognized: list, result: dict, dry_run: bool,
+                       phrase_stopwords: dict = None) -> str:
     """
     格式化生成 JSON 结构化分类报告
     """
+    phrase_stopwords = phrase_stopwords or {}
     new_add_vids = result["new_add_voc_ids"]
     advance_vids = result["advance_voc_ids"]
 
@@ -395,7 +448,12 @@ def format_report_json(direct_matches: dict, phrase_splits: dict, split_matches:
             else:
                 st = "unrecognized"
             w_list.append({"word": w, "status": st, "voc_id": vid})
-        phrase_detail.append({"phrase": phrase, "words": w_list})
+        entry = {"phrase": phrase, "words": w_list}
+        if phrase in phrase_stopwords:
+            entry["skipped_stopwords"] = phrase_stopwords[phrase]
+        phrase_detail.append(entry)
+
+    all_stopword_phrases = [p for p in phrase_stopwords if p not in phrase_splits]
 
     out = {
         "dry_run": dry_run,
@@ -403,6 +461,7 @@ def format_report_json(direct_matches: dict, phrase_splits: dict, split_matches:
             "new_added_count": len(direct_new) + len(split_new),
             "advance_review_count": len(direct_advance) + len(split_advance),
             "phrase_splits_count": len(phrase_splits),
+            "skipped_stopwords_count": sum(len(v) for v in phrase_stopwords.values()),
             "unrecognized_count": len(unrecognized)
         },
         "new_added": {
@@ -414,9 +473,37 @@ def format_report_json(direct_matches: dict, phrase_splits: dict, split_matches:
             "from_phrases": split_advance
         },
         "phrase_splits": phrase_detail,
+        "skipped_all_stopword_phrases": all_stopword_phrases,
         "unrecognized": unrecognized
     }
     return json.dumps(out, ensure_ascii=False, indent=2)
+
+
+def cleanup_input_file(path: str) -> bool:
+    """
+    导入成功后清理输入 JSON 临时文件：删除文件本身，并尝试删除因此变空的临时父目录
+    （最多向上两级，仅当目录为空时删除；绝不触碰当前工作目录及更上层）。
+    清理失败静默忽略，不影响导入结果。返回是否删除了文件本身。
+    """
+    try:
+        p = os.path.abspath(path)
+        if not os.path.isfile(p):
+            return False
+        os.remove(p)
+        parent = os.path.dirname(p)
+        cwd = os.path.abspath(os.getcwd())
+        for _ in range(2):
+            # 到达工作目录或文件系统根时停止，只清理专属临时子目录
+            if parent == cwd or os.path.dirname(parent) == parent:
+                break
+            try:
+                os.rmdir(parent)  # 仅当目录为空时成功，非空抛 OSError
+            except OSError:
+                break
+            parent = os.path.dirname(parent)
+        return True
+    except OSError:
+        return False
 
 
 def main():
@@ -425,6 +512,7 @@ def main():
     parser.add_argument("--token", dest="token", help="墨墨 API Token (若不指定则读取 MAIMEMOTOKEN 或 MAIMEMO_TOKEN 环境变量)")
     parser.add_argument("--dry-run", dest="dry_run", action="store_true", help="预览模式，仅查询与分流，不执行写入操作")
     parser.add_argument("--format", dest="output_format", choices=["text", "json"], default="text", help="报告输出格式 (text 或 json)")
+    parser.add_argument("--keep-json", dest="keep_json", action="store_true", help="导入成功后保留输入 JSON 文件（默认自动删除临时输入文件及其变空的父目录）")
 
     args = parser.parse_args()
 
@@ -476,7 +564,7 @@ def main():
 
     # 3. 词汇查询与短语拆分兜底
     try:
-        direct_matches, phrase_splits, split_matches, unrecognized = resolve_vocabularies(terms, token)
+        direct_matches, phrase_splits, split_matches, unrecognized, phrase_stopwords = resolve_vocabularies(terms, token)
     except MaiMemoAPIError as e:
         print(f"[ERROR] 墨墨词汇解析失败: {e}", file=sys.stderr)
         sys.exit(1)
@@ -490,11 +578,17 @@ def main():
 
     # 5. 输出报告
     if args.output_format == "json":
-        report = format_report_json(direct_matches, phrase_splits, split_matches, unrecognized, result, args.dry_run)
+        report = format_report_json(direct_matches, phrase_splits, split_matches, unrecognized, result, args.dry_run, phrase_stopwords)
     else:
-        report = format_report_text(direct_matches, phrase_splits, split_matches, unrecognized, result, args.dry_run)
+        report = format_report_text(direct_matches, phrase_splits, split_matches, unrecognized, result, args.dry_run, phrase_stopwords)
 
     print(report)
+
+    # 6. 自动清理临时输入文件（仅正式导入成功时；dry-run 与 --keep-json 例外）
+    if (not args.dry_run and not args.keep_json
+            and args.json_input and os.path.isfile(args.json_input)):
+        if cleanup_input_file(args.json_input):
+            print(f"\n🧹 已自动清理临时输入文件: {os.path.abspath(args.json_input)}")
 
 
 if __name__ == "__main__":
