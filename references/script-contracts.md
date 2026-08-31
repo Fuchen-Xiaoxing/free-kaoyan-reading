@@ -36,8 +36,11 @@
 
 ## 3. 错题本批量归档：`scripts/record_error.py`
 
-- **命令格式**：`python scripts/record_error.py --file 错题本.md --json <JSON字符串或文件路径> [--keep-json]`（亦支持 stdin 管道输入）
-- **功能特性**：ID 自动去重递增、12 类错误类型与能力短板严格校验、YAML frontmatter + 正文格式批量追加至 `错题本.md`（只追加、不覆盖）。脚本内置宽容度别名映射（如兼容 `type`/`shortboard`/`body` 等简写键名）。**归档成功后默认自动删除输入 JSON 临时文件及其变空的临时父目录**（`--keep-json` 保留）。
+- **命令格式**：`python scripts/record_error.py [--file <路径>] --json <JSON字符串或文件路径> [--keep-json]`（亦支持 stdin 管道输入，**建议省略 `--file` 走默认安全持久化路径**）
+- **功能特性**：
+  - **跨平台安全持久化**：`--file` 参数可选。默认优先写入 **Android 手机公共文档目录**（`/storage/emulated/0/Documents/考研英语/错题本.md`），使数据彻底与 Skill 目录解耦（更新/重装 Skill 绝不丢数据），且支持手机上的 Obsidian、WPS 或自带文件管理器直接查阅；PC 环境默认存入 `~/Documents/考研英语/错题本.md`；支持环境变量 `KAOYAN_ERROR_NOTEBOOK` 自定义路径；
+  - **历史数据自动迁移**：若检测到旧 Skill 目录中残留有效错题，首次归档时自动将历史条目无损合并至持久化错题本，并备份旧文件；
+  - **数据归档与校验**：ID 自动去重递增、12 类错误类型与能力短板严格校验、YAML frontmatter + 正文格式批量追加（只追加、不覆盖、自动清理占位符 `（暂无）`）。脚本内置宽容度别名映射。**归档成功后默认自动删除输入 JSON 临时文件及其变空的临时父目录**（`--keep-json` 保留）。
 - **输入 JSON Schema**（错题对象数组）：
   ```json
   [

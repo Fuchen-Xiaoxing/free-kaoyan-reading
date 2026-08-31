@@ -39,7 +39,138 @@ ERROR_TYPES = [
 # 能力短板封闭集合
 ABILITY_SHORTBOARDS = ["词汇", "语法", "主旨"]
 
-DEFAULT_FILE = "错题本.md"
+DEFAULT_FILE_NAME = "错题本.md"
+
+def get_default_notebook_path() -> str:
+    """
+    智能解析错题本安全持久化存储路径，彻底与 Skill 目录解耦（保障更新/重装 Skill 绝不丢失）：
+    1. 环境变量优先：KAOYAN_ERROR_NOTEBOOK 或 ERROR_NOTEBOOK_PATH
+    2. Android 手机公共文档目录优先（尤其针对 Open Minis / Android PRoot 环境）：
+       - /storage/emulated/0/Documents/考研英语/错题本.md
+       - /sdcard/Documents/考研英语/错题本.md
+       - /storage/emulated/0/Download/考研英语/错题本.md
+       - /sdcard/Download/考研英语/错题本.md
+    3. Open Minis 沙盒持久工作区降级：
+       - /var/minis/workspace/错题本.md
+    4. PC / 常规环境（Windows / macOS / Linux）公共文档目录：
+       - ~/Documents/考研英语/错题本.md
+    5. 全局用户主目录安全兜底：
+       - ~/.free-kaoyan-reading/错题本.md
+    """
+    # 1. 环境变量优先
+    env_path = os.environ.get("KAOYAN_ERROR_NOTEBOOK") or os.environ.get("ERROR_NOTEBOOK_PATH")
+    if env_path:
+        return os.path.abspath(env_path)
+
+    # 2. Android 手机公共文档目录优先（仅当处于 Linux/Android/PRoot 沙盒或检测到 /var/minis 时）
+    is_android_or_minis = (os.name != 'nt') or os.path.exists("/var/minis")
+    if is_android_or_minis:
+        android_candidates = [
+            "/storage/emulated/0/Documents/考研英语/错题本.md",
+            "/sdcard/Documents/考研英语/错题本.md",
+            "/storage/emulated/0/Download/考研英语/错题本.md",
+            "/sdcard/Download/考研英语/错题本.md",
+        ]
+        for cand in android_candidates:
+            try:
+                parent = os.path.dirname(cand)
+                # 检查是否存在 Android 存储挂载根节点
+                if os.path.exists(parent) or os.path.exists("/storage/emulated/0") or os.path.exists("/sdcard"):
+                    os.makedirs(parent, exist_ok=True)
+                    test_file = os.path.join(parent, ".perm_test")
+                    with open(test_file, "w", encoding="utf-8") as f:
+                        f.write("1")
+                    os.remove(test_file)
+                    return cand
+            except Exception:
+                continue
+
+        # 3. Open Minis 官方 workspace 降级
+        minis_ws = "/var/minis/workspace"
+        if os.path.exists(minis_ws):
+            try:
+                os.makedirs(minis_ws, exist_ok=True)
+                cand = os.path.join(minis_ws, DEFAULT_FILE_NAME)
+                test_file = os.path.join(minis_ws, ".perm_test")
+                with open(test_file, "w", encoding="utf-8") as f:
+                    f.write("1")
+                os.remove(test_file)
+                return cand
+            except Exception:
+                pass
+
+    # 4. PC / 常规系统（Windows / macOS / Linux）用户文档目录
+    try:
+        home = os.path.expanduser("~")
+        docs_dir = os.path.join(home, "Documents", "考研英语")
+        if os.path.exists(os.path.join(home, "Documents")):
+            os.makedirs(docs_dir, exist_ok=True)
+            return os.path.join(docs_dir, DEFAULT_FILE_NAME)
+    except Exception:
+        pass
+
+    # 5. 全局用户主目录安全兜底
+    try:
+        home_fallback = os.path.join(os.path.expanduser("~"), ".free-kaoyan-reading")
+        os.makedirs(home_fallback, exist_ok=True)
+        return os.path.join(home_fallback, DEFAULT_FILE_NAME)
+    except Exception:
+        return os.path.abspath(DEFAULT_FILE_NAME)
+
+
+def migrate_legacy_notebook_if_needed(target_path: str):
+    """
+    检查旧 Skill 目录下是否存在历史遗留错题数据。
+    若存在且目标文件与旧文件不同，将旧文件中的有效条目无损合并至新目标持久化路径，并备份旧文件。
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    skill_dir = os.path.dirname(script_dir)
+    legacy_candidates = [
+        os.path.join(skill_dir, DEFAULT_FILE_NAME),
+        os.path.abspath(DEFAULT_FILE_NAME),
+    ]
+    target_abs = os.path.abspath(target_path)
+
+    for leg_path in legacy_candidates:
+        leg_abs = os.path.abspath(leg_path)
+        if leg_abs == target_abs or not os.path.isfile(leg_abs):
+            continue
+
+        try:
+            with open(leg_abs, "r", encoding="utf-8") as f:
+                legacy_text = f.read()
+
+            # 检查旧文件中是否包含真实的错题条目（特征: id: XXX）
+            if not re.search(r"^id:\s*.+$", legacy_text, re.MULTILINE):
+                continue
+
+            target_ids = get_existing_ids(target_abs)
+            if not os.path.exists(target_abs) or os.path.getsize(target_abs) == 0:
+                parent_dir = os.path.dirname(target_abs)
+                if parent_dir:
+                    os.makedirs(parent_dir, exist_ok=True)
+                with open(target_abs, "w", encoding="utf-8") as f:
+                    f.write(legacy_text)
+                print(f"[MIGRATION] 已将旧错题本完整迁移至持久化路径: {target_abs}")
+            else:
+                raw_entries = re.split(r"(?=\n---\nid:)", "\n" + legacy_text)
+                to_append = []
+                for entry in raw_entries:
+                    m = re.search(r"^id:\s*(.+)$", entry.strip(), re.MULTILINE)
+                    if m and m.group(1).strip() not in target_ids:
+                        to_append.append(entry.strip() + "\n\n")
+                if to_append:
+                    with open(target_abs, "a", encoding="utf-8") as f:
+                        f.write("\n" + "".join(to_append))
+                    print(f"[MIGRATION] 已将旧错题本中的历史条目合并至持久化路径: {target_abs}")
+
+            bak_path = leg_abs + ".migrated.bak"
+            if os.path.exists(bak_path):
+                os.remove(bak_path)
+            os.rename(leg_abs, bak_path)
+        except Exception as e:
+            print(f"[WARNING] 旧错题迁移提示 (跳过): {e}", file=sys.stderr)
+
 
 def get_existing_ids(file_path):
     if not os.path.exists(file_path):
@@ -119,6 +250,9 @@ def append_errors(file_path, items):
         print("[WARNING] 没有待追加的错题条目。", file=sys.stderr)
         return []
 
+    # 首次归档前，若存在旧 Skill 目录遗留数据，自动安全合并迁移
+    migrate_legacy_notebook_if_needed(file_path)
+
     existing_ids = get_existing_ids(file_path)
     added_ids = []
     contents = []
@@ -154,10 +288,11 @@ def append_errors(file_path, items):
     with open(file_path, "a", encoding="utf-8") as f:
         f.write("".join(contents))
 
+    target_abs = os.path.abspath(file_path)
     if len(added_ids) == 1:
-        print(f"[SUCCESS] 错题已成功追加至错题本，条目 ID: {added_ids[0]}")
+        print(f"[SUCCESS] 错题已成功追加至错题本，条目 ID: {added_ids[0]} (存储路径: {target_abs})")
     else:
-        print(f"[SUCCESS] 成功批量追加 {len(added_ids)} 条错题至错题本: {', '.join(added_ids)}")
+        print(f"[SUCCESS] 成功批量追加 {len(added_ids)} 条错题至错题本: {', '.join(added_ids)} (存储路径: {target_abs})")
 
     return added_ids
 
@@ -175,11 +310,10 @@ def cleanup_input_file(path: str) -> bool:
         parent = os.path.dirname(p)
         cwd = os.path.abspath(os.getcwd())
         for _ in range(2):
-            # 到达工作目录或文件系统根时停止，只清理专属临时子目录
             if parent == cwd or os.path.dirname(parent) == parent:
                 break
             try:
-                os.rmdir(parent)  # 仅当目录为空时成功，非空抛 OSError
+                os.rmdir(parent)
             except OSError:
                 break
             parent = os.path.dirname(parent)
@@ -190,7 +324,7 @@ def cleanup_input_file(path: str) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description="考研英语阅读错题批量/单条追加记录工具")
-    parser.add_argument("--file", default=DEFAULT_FILE, help="错题本文件路径（默认: 错题本.md）")
+    parser.add_argument("--file", default=None, help="错题本文件路径（默认: 自动安全持久化，Android 优先写入手机公共 Documents 目录）")
     parser.add_argument("--json", dest="json_input", help="以 JSON 字符串或 JSON 文件路径传入完整参数（支持单个对象或对象数组）")
     parser.add_argument("--id", help="题目唯一 ID (如 2009-T4-Q21)")
     parser.add_argument("--type", "--question-type", dest="question_type", default="细节题", help="题型")
@@ -252,7 +386,8 @@ def main():
                 "analysis": args.analysis
             }]
 
-    append_errors(args.file, items)
+    target_file = args.file or get_default_notebook_path()
+    append_errors(target_file, items)
 
     # 归档成功后自动清理临时输入文件（--keep-json 例外）
     if (not args.keep_json and args.json_input

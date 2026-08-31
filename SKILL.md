@@ -17,7 +17,7 @@ description: 考研英语阅读一对一私教，按固定方法论、固定节�
 ## 依赖说明
 
 - **词汇管理**：通过 `scripts/memo_import.py` 自动化调用墨墨背单词 Open API（Token 从环境变量 `MAIMEMOTOKEN` 或 `MAIMEMO_TOKEN` 读取），实现词条批量解析、短语拆分兜底（自动过滤 the / of / to 等虚词，不污染学习队列）、新词待背与旧词提前复习自动分流；导入成功后自动清理输入 JSON 临时文件。
-- **错题存储**：`错题本.md` 默认存放在本 skill 根目录下。
+- **错题存储**：`错题本.md` 采用安全持久化存储机制，在 Android（如 Open Minis）环境下默认直接存入手机公共文档目录（`/storage/emulated/0/Documents/考研英语/错题本.md`，支持 Obsidian、WPS 或系统文件管理器随时查阅），彻底与 Skill 代码解耦，更新/重装 Skill 绝不丢失历史错题。
 
 ## 开工必读（按意图分支加载）
 
@@ -92,7 +92,7 @@ description: 考研英语阅读一对一私教，按固定方法论、固定节�
 ### 阶段 3：收尾双询问（依次进行）
 
 **询问 1：是否记录错题？**
-- 确认后，优先直接通过命令行 `--json '<JSON字符串>'`（或通过 stdin 管道/单步临时文件）调用 `python scripts/record_error.py --file 错题本.md --json '<JSON>'` 一次性**批量追加**到 `错题本.md`（只追加、不覆盖历史条目；命令与 Schema 见 `references/script-contracts.md`，条目规范见 `references/error-log-format.md`）。在正文中向用户反馈记录成功提示与追加的条目 ID。
+- 确认后，优先直接通过命令行 `--json '<JSON字符串>'`（或通过 stdin 管道/单步临时文件）调用 `python scripts/record_error.py --json '<JSON>'`（**默认省略 `--file` 参数，由脚本自动定位至手机公共文档目录等安全持久化路径**）一次性**批量追加**到 `错题本.md`（只追加、不覆盖历史条目；命令与 Schema 见 `references/script-contracts.md`，条目规范见 `references/error-log-format.md`）。在正文中向用户反馈记录成功提示与追加的条目 ID及保存路径。
 - 本篇全对则跳过此询问。
 
 **询问 2：是否总结本篇核心单词与词组？**
@@ -136,7 +136,7 @@ description: 考研英语阅读一对一私教，按固定方法论、固定节�
 
 - **【严禁查阅脚本源码】**：正式脚本已在 `references/script-contracts.md`（脚本接口与调用契约）中完整定义其命令格式、参数与 JSON Schema。AI 必须直接按契约构造 JSON 和调用命令行，**绝对禁止调用 view_file 或 grep_search 查看 scripts/ 目录下的 Python 源码**（避免无谓消耗上下文）。只有脚本报错且 stderr 无法定位时，才允许定点查看报错位置。
 - **【词汇表格与报告透明】**：阶段三导出的 Markdown 词汇表格和墨墨导入分类报告必须 100% 完整呈现在与用户的回复正文中，严禁仅在后台运行或静默完成。
-- **错题存储与追加**：`错题本.md`（默认在本 skill 目录下），篇末确认后统一调用 `scripts/record_error.py` 传入本篇错题 JSON 数组**批量追加**（只追加、不覆盖、禁止手工拼写）。
+- **错题存储与追加**：默认自动持久化至安全存储路径（Android 手机公共文档目录 `/storage/emulated/0/Documents/考研英语/错题本.md`，彻底与 Skill 代码解耦），篇末确认后统一调用 `scripts/record_error.py --json '<JSON>'` 传入本篇错题 JSON 数组**批量追加**（只追加、不覆盖、禁止手工拼写；自动保障旧错题安全迁移）。
 - **错误标准与 Schema**：错误类型与能力短板严格遵循 `references/error-types.md` 规范，条目格式遵循 `references/error-log-format.md`。
 - **同篇错题引用**：同篇内前面题的错，讲解后面题时直接从对话上下文引用，不检索历史错题本。
 - **上下文管理**：开工读取一次后信任上下文；确需回查时用 grep 定位关键词所在行再定点读取，禁止全文件重读。
