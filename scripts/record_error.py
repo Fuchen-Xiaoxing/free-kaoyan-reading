@@ -142,6 +142,14 @@ def append_errors(file_path, items):
         header = "# 错题本\n\n本文件存放考研英语阅读错题，由 FREE考研英语阅读理解 (free-kaoyan-reading) skill 维护。\n\n## 错题列表\n"
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(header)
+    else:
+        # 若存在初始模板占位符“（暂无）”，自动清理剔除
+        with open(file_path, "r", encoding="utf-8") as f:
+            content_str = f.read()
+        if "（暂无）" in content_str or "(暂无)" in content_str:
+            cleaned_str = re.sub(r"[（(]暂无[）)]\s*", "", content_str)
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(cleaned_str)
 
     with open(file_path, "a", encoding="utf-8") as f:
         f.write("".join(contents))

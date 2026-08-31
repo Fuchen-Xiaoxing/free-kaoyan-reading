@@ -172,9 +172,60 @@ def split_phrase_into_words(phrase: str) -> tuple:
     return cleaned, skipped
 
 
+def get_lemma_candidates(word: str) -> list:
+    """
+    针对直接查询未命中的词条，生成基于规则的后缀还原候选（复数 -s/-es、过去分词 -ed、分词 -ing）。
+    返回按置信度排序的原型候选词列表（全小写，不包含自身）。
+    """
+    w = word.strip().lower()
+    if len(w) <= 3:
+        return []
+
+    candidates = []
+
+    def add(c):
+        if c and c != w and len(c) >= 2 and c not in candidates:
+            candidates.append(c)
+
+    # 1. 过去式 / 过去分词 -ed
+    if w.endswith("ied") and len(w) > 4:
+        add(w[:-3] + "y")  # studied -> study, denied -> deny
+    elif w.endswith("ed") and len(w) > 3:
+        # 双写辅音 + ed (dimmed -> dim, stopped -> stop, planned -> plan)
+        if len(w) > 4 and w[-3] == w[-4] and w[-3] in "bdfgklmnprstz":
+            add(w[:-3])
+        # 去掉 d (graduated -> graduate, improved -> improve, divided -> divide)
+        add(w[:-1])
+        # 去掉 ed (suggested -> suggest, affected -> affect)
+        add(w[:-2])
+
+    # 2. 现在分词 / 动名词 -ing
+    if w.endswith("ing") and len(w) > 4:
+        # 双写辅音 + ing (beginning -> begin, running -> run)
+        if len(w) > 5 and w[-4] == w[-5] and w[-4] in "bdfgklmnprstz":
+            add(w[:-4])
+        # 去掉 ing (spending -> spend, affecting -> affect)
+        add(w[:-3])
+        # ing -> e (reshaping -> reshape, stagnating -> stagnate, deciding -> decide)
+        add(w[:-3] + "e")
+
+    # 3. 复数 / 第三人称单数 -s / -es
+    if w.endswith("ies") and len(w) > 4:
+        add(w[:-3] + "y")  # categories -> category
+    elif w.endswith("es") and len(w) > 3:
+        # 去掉 s 保留 e (divides -> divide, chances -> chance, houses -> house)
+        add(w[:-1])
+        # 去掉 es (classes -> class, watches -> watch, boxes -> box)
+        add(w[:-2])
+    elif w.endswith("s") and not w.endswith("ss") and len(w) > 3:
+        add(w[:-1])  # recessions -> recession, times -> time
+
+    return candidates
+
+
 def resolve_vocabularies(terms: list, token: str) -> tuple:
     """
-    批量查询词汇 ID，包含整词查询和短语拆分兜底
+    批量查询词汇 ID，包含整词查询、短语拆分兜底与基于规则的后缀还原原型查询
     返回:
       direct_matches: {term: voc_id}
       phrase_splits: {phrase: [word1, word2, ...]}
@@ -215,7 +266,7 @@ def resolve_vocabularies(terms: list, token: str) -> tuple:
         else:
             unmatched_terms.append(t)
 
-    # 2. 对未命中的词条进行分类：是短语则拆分（过滤虚词），是单字则归入无法识别
+    # 2. 对未命中的词条进行分类：是短语则拆分（过滤虚词），是单字则暂归入无法识别
     words_to_query = set()
     for t in unmatched_terms:
         words, skipped = split_phrase_into_words(t)
@@ -255,7 +306,43 @@ def resolve_vocabularies(terms: list, token: str) -> tuple:
                     if w not in unrecognized:
                         unrecognized.append(w)
 
+    # 4. 基于规则的后缀还原（复数 -s/-es、过去分词 -ed、分词 -ing）：直接查询失败时自动尝试原型查询
+    candidates_to_query = set()
+    word_to_candidates = {}
+    for u in list(unrecognized):
+        if re.fullmatch(r"[A-Za-z]+(?:'[A-Za-z]+)?", u):
+            cands = get_lemma_candidates(u)
+            if cands:
+                word_to_candidates[u] = cands
+                for c in cands:
+                    c_key = c.lower()
+                    if c_key not in lookup_map:
+                        candidates_to_query.add(c)
+
+    if candidates_to_query:
+        res_lemma = make_api_request("/vocabulary/query", {"spellings": list(candidates_to_query)}, token=token)
+        lemma_voc_list = res_lemma.get("data", {}).get("voc", [])
+        for item in lemma_voc_list:
+            lookup_map[item["spelling"].lower()] = (item["id"], item["spelling"])
+
+    # 检查后缀还原候选是否命中
+    for u, cands in word_to_candidates.items():
+        for c in cands:
+            c_key = c.lower()
+            if c_key in lookup_map:
+                vid = lookup_map[c_key][0]
+                lookup_map[u.lower()] = (vid, lookup_map[c_key][1])
+                if u in unrecognized:
+                    unrecognized.remove(u)
+                if u in terms:
+                    direct_matches[u] = vid
+                for p, p_words in phrase_splits.items():
+                    if u in p_words:
+                        split_matches[u] = vid
+                break
+
     return direct_matches, phrase_splits, split_matches, unrecognized, phrase_stopwords
+
 
 
 def partition_and_import(direct_matches: dict, phrase_splits: dict, split_matches: dict, token: str, dry_run: bool = False) -> dict:

@@ -40,25 +40,6 @@ error_type: 无对应内容
 | `教训金句` / `lesson` | 是 | 一句话前瞻教训与应对解法 |
 | `正文` / `analysis` | 是 | 详细的错误分析与复盘 |
 
-## 脚本批量追加 JSON Schema (`scripts/record_error.py`)
+## 脚本调用与 JSON Schema
 
-```json
-[
-  {
-    "id": "2009-T4-Q21",
-    "question_type": "细节题",
-    "error_type": "无对应内容",
-    "ability_shortboard": "词汇",
-    "keyword": "题干定位词",
-    "location": "L12-13",
-    "restore": "混淆了选项概念...",
-    "attribution": "忽略了正负态度色彩...",
-    "lesson": "定位句未出现概念坚决排除",
-    "analysis": "详细复盘正文..."
-  }
-]
-```
-
-*(注：脚本已内置键名宽容别名映射，`question_type` 支持 `type`/`题型`，`ability_shortboard` 支持 `shortboard`/`ability`/`能力短板`，`error_type` 支持 `error`/`错误类型`，`analysis` 支持 `body`/`content`/`正文`)*
-
-
+错题批量归档脚本的输入命令格式、JSON Schema 与别名映射完整定义统一参见 **`references/script-contracts.md`**（第 3 节「错题本批量归档」），此处不再重复定义。

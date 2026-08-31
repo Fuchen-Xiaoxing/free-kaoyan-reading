@@ -4,11 +4,11 @@
 >
 > ⚠️ **【强约束】AI 严禁调用 view_file / grep 查看 `scripts/` 目录下的 Python 源码文件。所有脚本调用方式、参数和 JSON Schema 完全以本契约规范为准，直接构造 JSON 与执行命令行。只有脚本报错且 stderr 无法定位时，才允许定点查看报错位置。**
 >
-> 📁 **临时文件约定**：临时 JSON 统一写入 `tmp/free-kaoyan-reading/<本篇唯一ID>/`（相对当前工作目录；不可写时改用系统临时目录下的同名路径）。`file_write` 不会自动创建父目录——写入前必须先执行 `mkdir -p <目录>`。`record_error.py` 与 `memo_import.py` 成功后**默认自动删除输入 JSON 及因此变空的临时子目录**，调用方无需再手动清理（`--keep-json` 可保留）。
+> 📁 **输入模式与临时文件约定**：**优先推荐直接输入/管道模式**——所有脚本均原生支持通过 `--json '<JSON字符串>'` 或标准输入（stdin 管道）直接传入数据，无需落地磁盘临时文件，消除工具链往返开销。若调用方选择写入临时文件，直接单步写入 `tmp/free-kaoyan-reading/<本篇唯一ID>/` 即可，**严禁在 shell 额外调用 `mkdir -p`**（脚本内部已原生支持目录自创建）。`record_error.py` 与 `memo_import.py` 在处理临时文件成功后**默认自动删除输入 JSON 及因此变空的临时子目录**（`--keep-json` 可保留）。
 
 ## 1. 词汇清单校验：`scripts/vocab_export.py`
 
-- **命令格式**：`python scripts/vocab_export.py --json <JSON文件路径或JSON字符串> [--format check|markdown|json]`
+- **命令格式**：`python scripts/vocab_export.py --json <JSON字符串或文件路径> [--format check|markdown|json]`（亦支持 stdin 管道输入）
 - **功能特性**：自动去重（忽略大小写）、强制限制 ≤30 个词条（超出自动截断）、剔除缺 word 字段的无效条目。**默认 `check` 模式输出紧凑校验简报，不输出整表**——Markdown 表格由 AI 在正文中自行渲染（校验有修正时，严格按简报附带的最终清单与词序渲染），避免同一张表进两遍上下文。
 - **输入 JSON Schema**（词汇对象数组）：
   ```json
@@ -28,15 +28,15 @@
 
 ## 2. 墨墨背单词一键导入：`scripts/memo_import.py`
 
-- **命令格式**：`python scripts/memo_import.py --json <JSON文件路径或JSON字符串> [--dry-run] [--format text|json] [--keep-json]`
+- **命令格式**：`python scripts/memo_import.py --json <JSON字符串或文件路径> [--dry-run] [--format text|json] [--keep-json]`（亦支持 stdin 管道输入）
 - **Token 机制**：自动从环境变量 `MAIMEMOTOKEN` 或 `MAIMEMO_TOKEN` 读取，无需显式传 `--token`。
-- **功能特性**：自动查询 `voc_id`；未收录短语自动拆分为单词兜底解析（**自动过滤 the/of/to 等虚词，虚词不进入查询与导入**，报告中单列「跳过虚词」明细）；比对已有学习记录后自动将新词添加待背、旧词提升提前复习。用户审阅确认表格后，**直接执行正式导入**（无需在 live 对话中多跑一次 `--dry-run` 浪费轮次）。**正式导入成功后默认自动删除输入 JSON 临时文件及其变空的临时父目录**（`--keep-json` 保留；`--dry-run` 不删除）。API 类脚本建议设 `timeout ≥ 120s`。
+- **功能特性**：自动查询 `voc_id`；未直接收录的词条自动执行**基于规则的后缀还原（复数 `-s/-es`、过去分词 `-ed`、分词 `-ing`）原型二次查询**；未收录短语自动拆分为单词兜底解析（**自动过滤 the/of/to 等虚词，虚词不进入查询与导入**，报告中单列「跳过虚词」明细）；比对已有学习记录后自动将新词添加待背、旧词提升提前复习。用户审阅确认表格后，**直接执行正式导入**（无需在 live 对话中多跑一次 `--dry-run` 浪费轮次）。**正式导入成功后默认自动删除输入 JSON 临时文件及其变空的临时父目录**（`--keep-json` 保留；`--dry-run` 不删除）。API 类脚本建议设 `timeout ≥ 120s`。
 - **输入 JSON Schema**：与 `vocab_export.py` 输入格式完全一致（直接传入同一个 JSON 文件即可）。
 - **输出**：stdout 打印分类统计报告（包含新加待背、提前复习、词组拆分明细、跳过虚词、无法识别及统计汇总）；成功清理时追加一行 `🧹 已自动清理临时输入文件: <路径>`（属预期日志，无需向用户报错）。
 
 ## 3. 错题本批量归档：`scripts/record_error.py`
 
-- **命令格式**：`python scripts/record_error.py --file 错题本.md --json <JSON文件路径或JSON字符串> [--keep-json]`
+- **命令格式**：`python scripts/record_error.py --file 错题本.md --json <JSON字符串或文件路径> [--keep-json]`（亦支持 stdin 管道输入）
 - **功能特性**：ID 自动去重递增、12 类错误类型与能力短板严格校验、YAML frontmatter + 正文格式批量追加至 `错题本.md`（只追加、不覆盖）。脚本内置宽容度别名映射（如兼容 `type`/`shortboard`/`body` 等简写键名）。**归档成功后默认自动删除输入 JSON 临时文件及其变空的临时父目录**（`--keep-json` 保留）。
 - **输入 JSON Schema**（错题对象数组）：
   ```json
