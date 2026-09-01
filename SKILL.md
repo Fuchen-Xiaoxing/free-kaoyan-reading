@@ -17,7 +17,7 @@ description: 考研英语阅读一对一私教，按固定方法论、固定节�
 ## 依赖说明
 
 - **词汇管理**：通过 `scripts/memo_import.py` 自动化调用墨墨背单词 Open API（Token 从环境变量 `MAIMEMOTOKEN` 或 `MAIMEMO_TOKEN` 读取），实现词条批量解析、短语拆分兜底（自动过滤 the / of / to 等虚词，不污染学习队列）、新词待背与旧词提前复习自动分流；导入成功后自动清理输入 JSON 临时文件。
-- **错题存储**：`错题本.md` 采用安全持久化存储机制，在 Android（如 Open Minis）环境下默认直接存入手机公共文档目录（`/storage/emulated/0/Documents/考研英语/错题本.md`，支持 Obsidian、WPS 或系统文件管理器随时查阅），彻底与 Skill 代码解耦，更新/重装 Skill 绝不丢失历史错题。
+- **错题存储**：`错题本.md` 采用安全持久化存储机制，在 Android（如 Open Minis）环境下默认优先写入已挂载的外部文档目录（如 `/var/minis/mounts/Documents/考研英语/错题本.md`）或系统公共文档目录（`/storage/emulated/0/Documents/考研英语/错题本.md`，支持 Obsidian、WPS 或系统文件管理器随时查阅；未挂载时自动保存在沙箱 `/var/minis/workspace/错题本.md`），彻底与 Skill 代码解耦，更新/重装 Skill 绝不丢失历史错题。
 
 ## 开工必读（按意图分支加载）
 

@@ -41,30 +41,94 @@ ABILITY_SHORTBOARDS = ["词汇", "语法", "主旨"]
 
 DEFAULT_FILE_NAME = "错题本.md"
 
+def sanitize_notebook_path(raw_path: str) -> str:
+    """
+    对错题本路径进行安全净化与自愈：
+    1. 若因环境编码剥离等原因导致文件名退化为 '.md'，自动纠偏至 '<parent>/考研英语/错题本.md'；
+    2. 若路径指向已存在的目录或以斜杠结尾，自动在该目录下追加 '考研英语/错题本.md'（若目录已是 '考研英语' 则追加 '错题本.md'）；
+    3. 保证返回绝对路径。
+    """
+    if not raw_path:
+        return ""
+    p = os.path.expanduser(raw_path.strip())
+    base = os.path.basename(p)
+    parent = os.path.dirname(p)
+
+    if base == ".md":
+        if os.path.basename(parent) == "考研英语":
+            return os.path.abspath(os.path.join(parent, DEFAULT_FILE_NAME))
+        return os.path.abspath(os.path.join(parent, "考研英语", DEFAULT_FILE_NAME))
+
+    if os.path.isdir(p) or p.endswith("/") or p.endswith("\\"):
+        clean_p = p.rstrip("/\\")
+        if os.path.basename(clean_p) == "考研英语":
+            return os.path.abspath(os.path.join(clean_p, DEFAULT_FILE_NAME))
+        return os.path.abspath(os.path.join(clean_p, "考研英语", DEFAULT_FILE_NAME))
+
+    return os.path.abspath(p)
+
+
 def get_default_notebook_path() -> str:
     """
     智能解析错题本安全持久化存储路径，彻底与 Skill 目录解耦（保障更新/重装 Skill 绝不丢失）：
-    1. 环境变量优先：KAOYAN_ERROR_NOTEBOOK 或 ERROR_NOTEBOOK_PATH
-    2. Android 手机公共文档目录优先（尤其针对 Open Minis / Android PRoot 环境）：
+    1. 环境变量优先：KAOYAN_ERROR_NOTEBOOK 或 ERROR_NOTEBOOK_PATH（带自动路径自愈）
+    2. Open Minis 外部挂载 Documents 优先（/var/minis/mounts/Documents/考研英语/错题本.md）
+    3. Android 手机公共文档目录原生探测：
        - /storage/emulated/0/Documents/考研英语/错题本.md
        - /sdcard/Documents/考研英语/错题本.md
        - /storage/emulated/0/Download/考研英语/错题本.md
        - /sdcard/Download/考研英语/错题本.md
-    3. Open Minis 沙盒持久工作区降级：
+    4. Open Minis 沙盒持久工作区降级：
        - /var/minis/workspace/错题本.md
-    4. PC / 常规环境（Windows / macOS / Linux）公共文档目录：
+    5. PC / 常规环境（Windows / macOS / Linux）公共文档目录：
        - ~/Documents/考研英语/错题本.md
-    5. 全局用户主目录安全兜底：
+    6. 全局用户主目录安全兜底：
        - ~/.free-kaoyan-reading/错题本.md
     """
-    # 1. 环境变量优先
+    # 1. 环境变量优先（进行路径自愈净化）
     env_path = os.environ.get("KAOYAN_ERROR_NOTEBOOK") or os.environ.get("ERROR_NOTEBOOK_PATH")
     if env_path:
-        return os.path.abspath(env_path)
+        return sanitize_notebook_path(env_path)
 
-    # 2. Android 手机公共文档目录优先（仅当处于 Linux/Android/PRoot 沙盒或检测到 /var/minis 时）
+    # 2. Open Minis 外部挂载目录与 Android 沙盒优先
     is_android_or_minis = (os.name != 'nt') or os.path.exists("/var/minis")
     if is_android_or_minis:
+        # 优先检测 Open Minis 挂载的外部目录
+        minis_mount_candidates = [
+            "/var/minis/mounts/Documents/考研英语/错题本.md",
+            "/var/minis/mounts/documents/考研英语/错题本.md",
+            "/var/minis/mounts/Documents/错题本.md",
+            "/var/minis/mounts/documents/错题本.md",
+        ]
+        if os.path.isdir("/var/minis/mounts"):
+            try:
+                for entry in os.listdir("/var/minis/mounts"):
+                    sub = os.path.join("/var/minis/mounts", entry)
+                    if os.path.isdir(sub) and entry.lower() in ["documents", "document", "docs"]:
+                        cand = os.path.join(sub, "考研英语", DEFAULT_FILE_NAME)
+                        if cand not in minis_mount_candidates:
+                            minis_mount_candidates.insert(0, cand)
+            except Exception:
+                pass
+
+        for cand in minis_mount_candidates:
+            try:
+                parent = os.path.dirname(cand)
+                # 检查挂载根路径是否存在
+                mount_root = parent
+                while mount_root and not os.path.exists(mount_root) and mount_root != "/":
+                    mount_root = os.path.dirname(mount_root)
+                if mount_root and mount_root != "/" and os.path.exists(mount_root):
+                    os.makedirs(parent, exist_ok=True)
+                    test_file = os.path.join(parent, ".perm_test")
+                    with open(test_file, "w", encoding="utf-8") as f:
+                        f.write("1")
+                    os.remove(test_file)
+                    return cand
+            except Exception:
+                continue
+
+        # 3. Android 原生公共存储路径探测
         android_candidates = [
             "/storage/emulated/0/Documents/考研英语/错题本.md",
             "/sdcard/Documents/考研英语/错题本.md",
@@ -74,7 +138,6 @@ def get_default_notebook_path() -> str:
         for cand in android_candidates:
             try:
                 parent = os.path.dirname(cand)
-                # 检查是否存在 Android 存储挂载根节点
                 if os.path.exists(parent) or os.path.exists("/storage/emulated/0") or os.path.exists("/sdcard"):
                     os.makedirs(parent, exist_ok=True)
                     test_file = os.path.join(parent, ".perm_test")
@@ -85,7 +148,7 @@ def get_default_notebook_path() -> str:
             except Exception:
                 continue
 
-        # 3. Open Minis 官方 workspace 降级
+        # 4. Open Minis 官方 workspace 降级
         minis_ws = "/var/minis/workspace"
         if os.path.exists(minis_ws):
             try:
@@ -99,7 +162,7 @@ def get_default_notebook_path() -> str:
             except Exception:
                 pass
 
-    # 4. PC / 常规系统（Windows / macOS / Linux）用户文档目录
+    # 5. PC / 常规系统（Windows / macOS / Linux）用户文档目录
     try:
         home = os.path.expanduser("~")
         docs_dir = os.path.join(home, "Documents", "考研英语")
@@ -109,7 +172,7 @@ def get_default_notebook_path() -> str:
     except Exception:
         pass
 
-    # 5. 全局用户主目录安全兜底
+    # 6. 全局用户主目录安全兜底
     try:
         home_fallback = os.path.join(os.path.expanduser("~"), ".free-kaoyan-reading")
         os.makedirs(home_fallback, exist_ok=True)
@@ -127,6 +190,7 @@ def migrate_legacy_notebook_if_needed(target_path: str):
     skill_dir = os.path.dirname(script_dir)
     legacy_candidates = [
         os.path.join(skill_dir, DEFAULT_FILE_NAME),
+        os.path.join(os.path.dirname(skill_dir), "free", DEFAULT_FILE_NAME),
         os.path.abspath(DEFAULT_FILE_NAME),
     ]
     target_abs = os.path.abspath(target_path)
@@ -322,10 +386,40 @@ def cleanup_input_file(path: str) -> bool:
         return False
 
 
+def print_notebook_info(file_path: str = None):
+    """打印错题本存储诊断信息"""
+    target = sanitize_notebook_path(file_path) if file_path else get_default_notebook_path()
+    exists = os.path.isfile(target)
+    entry_count = len(get_existing_ids(target)) if exists else 0
+
+    writable = False
+    parent = os.path.dirname(target)
+    try:
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        test_file = os.path.join(parent, ".perm_test") if parent else ".perm_test"
+        with open(test_file, "w", encoding="utf-8") as f:
+            f.write("1")
+        os.remove(test_file)
+        writable = True
+    except Exception:
+        writable = False
+
+    print("=== 错题本存储诊断信息 ===")
+    print(f"目标路径: {target}")
+    print(f"文件存在: {'是' if exists else '否'}")
+    print(f"可写状态: {'可写入' if writable else '只读/不可写'}")
+    print(f"已存错题: {entry_count} 条")
+    if exists and entry_count > 0:
+        ids = sorted(list(get_existing_ids(target)))
+        print(f"条目清单: {', '.join(ids)}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="考研英语阅读错题批量/单条追加记录工具")
     parser.add_argument("--file", default=None, help="错题本文件路径（默认: 自动安全持久化，Android 优先写入手机公共 Documents 目录）")
     parser.add_argument("--json", dest="json_input", help="以 JSON 字符串或 JSON 文件路径传入完整参数（支持单个对象或对象数组）")
+    parser.add_argument("--info", "--status", action="store_true", help="打印当前错题本存储路径与状态诊断信息")
     parser.add_argument("--id", help="题目唯一 ID (如 2009-T4-Q21)")
     parser.add_argument("--type", "--question-type", dest="question_type", default="细节题", help="题型")
     parser.add_argument("--error-type", dest="error_type", help="12 类错误类型之一")
@@ -339,6 +433,10 @@ def main():
     parser.add_argument("--keep-json", dest="keep_json", action="store_true", help="归档成功后保留输入 JSON 文件（默认自动删除临时输入文件及其变空的父目录）")
 
     args = parser.parse_args()
+
+    if args.info:
+        print_notebook_info(args.file)
+        return
 
     items = []
     if args.json_input:
@@ -372,7 +470,7 @@ def main():
                         items = [raw_data]
         if not items:
             if not args.error_type or not args.ability_shortboard or not args.id:
-                parser.error("必须提供 --id, --error-type, --shortboard 或通过 --json / stdin 提供完整参数")
+                parser.error("必须提供 --id, --error-type, --shortboard 或通过 --json / stdin 提供完整参数（或传 --info 查看状态）")
             items = [{
                 "id": args.id,
                 "question_type": args.question_type,
@@ -386,7 +484,7 @@ def main():
                 "analysis": args.analysis
             }]
 
-    target_file = args.file or get_default_notebook_path()
+    target_file = sanitize_notebook_path(args.file) if args.file else get_default_notebook_path()
     append_errors(target_file, items)
 
     # 归档成功后自动清理临时输入文件（--keep-json 例外）

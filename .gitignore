@@ -12,6 +12,7 @@ __pycache__/
 tmp/
 *.tmp
 *.log
+_-*/
 
 # IDE & Editor
 .vscode/
