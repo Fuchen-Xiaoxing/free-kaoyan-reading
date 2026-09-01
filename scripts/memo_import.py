@@ -108,9 +108,15 @@ def make_api_request(endpoint: str, data: dict = None, token: str = "") -> dict:
         raise MaiMemoAPIError(f"请求超时 ({endpoint}, >{TIMEOUT_SECONDS}s)")
 
 
-def parse_input_vocab(raw_input) -> list:
+MAX_VOCAB_LIMIT = 30
+
+
+def normalize_vocab_entries(raw_input) -> tuple:
     """
-    解析并提取词汇清单列表
+    解析并归一化词汇清单列表。
+    支持纯字符串列表、字典列表，自动去重（忽略大小写，保留首次出现），
+    自动剔除缺 word 字段的无效项，强制限制 <= MAX_VOCAB_LIMIT。
+    返回 (deduped_dicts, deduped_terms, duplicates, truncated, invalid)
     """
     if isinstance(raw_input, dict):
         if "words" in raw_input and isinstance(raw_input["words"], list):
@@ -123,29 +129,101 @@ def parse_input_vocab(raw_input) -> list:
     if not isinstance(raw_input, list):
         raise ValueError("输入数据必须为词汇列表或包含 words/vocab 列表的对象")
 
-    terms = []
     seen = set()
+    deduped_dicts = []
+    deduped_terms = []
+    duplicates = []
+    invalid = []
+
     for item in raw_input:
         if isinstance(item, str):
             term = item.strip()
+            dict_item = {"word": term, "meaning": "", "tone": "", "source": ""}
         elif isinstance(item, dict):
-            term = item.get("word", item.get("term", item.get("单词", item.get("词组", ""))))
-            if isinstance(term, str):
-                term = term.strip()
-            else:
-                term = ""
+            raw_word = item.get("word", item.get("term", item.get("单词", item.get("词组", ""))))
+            term = raw_word.strip() if isinstance(raw_word, str) else ""
+            dict_item = {
+                "word": term,
+                "meaning": (item.get("meaning", item.get("definition", item.get("释义", item.get("文中释义", "")))) or "").strip(),
+                "tone": (item.get("tone", item.get("attitude", item.get("态度", item.get("态度色彩", "")))) or "").strip(),
+                "source": (item.get("source", item.get("origin", item.get("出处", ""))) or "").strip(),
+            }
         else:
             term = ""
+            dict_item = None
 
         if not term:
+            if item:
+                invalid.append(item)
             continue
 
         key = term.lower()
-        if key not in seen:
-            seen.add(key)
-            terms.append(term)
+        if key in seen:
+            duplicates.append(term)
+            continue
+        seen.add(key)
+        deduped_dicts.append(dict_item)
+        deduped_terms.append(term)
 
+    truncated = []
+    if len(deduped_dicts) > MAX_VOCAB_LIMIT:
+        truncated = deduped_dicts[MAX_VOCAB_LIMIT:]
+        deduped_dicts = deduped_dicts[:MAX_VOCAB_LIMIT]
+        deduped_terms = deduped_terms[:MAX_VOCAB_LIMIT]
+
+    return deduped_dicts, deduped_terms, duplicates, truncated, invalid
+
+
+def parse_input_vocab(raw_input) -> list:
+    """
+    解析并提取词汇清单列表（去重并截断至 MAX_VOCAB_LIMIT）
+    """
+    _, terms, _, truncated, _ = normalize_vocab_entries(raw_input)
+    if truncated:
+        print(f"[WARNING] 词汇数量超过最大限制 ({MAX_VOCAB_LIMIT})，已自动截断保留前 {MAX_VOCAB_LIMIT} 个词条。", file=sys.stderr)
     return terms
+
+
+def format_validation_report(deduped_dicts, duplicates, truncated, invalid, output_format="check") -> str:
+    """
+    格式化词汇校验报告（用于 --validate-only）
+    """
+    total_count = len(deduped_dicts)
+    if output_format == "json":
+        return json.dumps(deduped_dicts, ensure_ascii=False, indent=2)
+
+    if output_format == "markdown":
+        lines = [f"### 本篇核心单词与词组清单（共 {total_count} 词，已去重且 ≤{MAX_VOCAB_LIMIT}）\n"]
+        lines.append("| # | 单词 / 词组 | 文中释义 | 态度色彩 | 出处 |")
+        lines.append("| :--- | :--- | :--- | :--- | :--- |")
+        for idx, item in enumerate(deduped_dicts, 1):
+            word = item['word'].replace('|', '\\|').replace('\n', ' ')
+            meaning = item['meaning'].replace('|', '\\|').replace('\n', ' ') if item['meaning'] else "-"
+            tone = item['tone'].replace('|', '\\|').replace('\n', ' ') if item['tone'] else "-"
+            source = item['source'].replace('|', '\\|').replace('\n', ' ') if item['source'] else "-"
+            lines.append(f"| {idx} | {word} | {meaning} | {tone} | {source} |")
+        return "\n".join(lines)
+
+    # 默认 check 简报
+    if total_count == 0:
+        return "❌ 校验失败：清单为空（全部条目无效或无词条）。"
+
+    has_corrections = bool(duplicates or truncated or invalid)
+    lines = []
+    if has_corrections:
+        lines.append(f"⚠️ 校验修正：最终 {total_count} 词（去重 {len(duplicates)} | 截断 {len(truncated)} | 无效条目 {len(invalid)}）")
+        if duplicates:
+            lines.append(f"  移除重复: {', '.join(duplicates)}")
+        if truncated:
+            lines.append(f"  截断移除: {', '.join(t['word'] for t in truncated)}")
+        if invalid:
+            lines.append(f"  无效条目（缺 word 字段）: {len(invalid)} 个")
+        lines.append(f"\n最终清单（共 {total_count} 词，请严格按此清单与词序在正文渲染 Markdown 表格）:")
+        lines.append(", ".join(item['word'] for item in deduped_dicts))
+    else:
+        lines.append(f"✅ 校验通过：共 {total_count} 词，无重复、未超限、无无效条目。请在正文中按原清单渲染 Markdown 表格。")
+    return "\n".join(lines)
+
 
 
 def split_phrase_into_words(phrase: str) -> tuple:
@@ -594,22 +672,19 @@ def cleanup_input_file(path: str) -> bool:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="考研英语篇末词汇墨墨背单词自动化导入工具")
+    parser = argparse.ArgumentParser(description="考研英语篇末核心词汇校验与墨墨背单词自动化导入工具")
     parser.add_argument("--json", dest="json_input", help="词汇清单 JSON 字符串或文件路径")
     parser.add_argument("--token", dest="token", help="墨墨 API Token (若不指定则读取 MAIMEMOTOKEN 或 MAIMEMO_TOKEN 环境变量)")
+    parser.add_argument("--validate-only", dest="validate_only", action="store_true", help="仅执行词汇去重、上限截断与格式校验，不请求墨墨 API")
     parser.add_argument("--dry-run", dest="dry_run", action="store_true", help="预览模式，仅查询与分流，不执行写入操作")
-    parser.add_argument("--format", dest="output_format", choices=["text", "json"], default="text", help="报告输出格式 (text 或 json)")
+    parser.add_argument("--format", dest="output_format", choices=["text", "json", "markdown", "check"], default=None,
+                        help="输出格式：text/json（默认导入模式），check/markdown/json（--validate-only 模式）")
     parser.add_argument("--keep-json", dest="keep_json", action="store_true", help="导入成功后保留输入 JSON 文件（默认自动删除临时输入文件及其变空的父目录）")
 
     args = parser.parse_args()
 
-    # 1. 检查并获取 Token
-    token = args.token or os.environ.get("MAIMEMOTOKEN") or os.environ.get("MAIMEMO_TOKEN")
-    if not token:
-        print("[ERROR] 缺少墨墨背单词 API Token。请在环境变量中设置 MAIMEMOTOKEN 或通过 --token 参数传入。", file=sys.stderr)
-        sys.exit(1)
-
-    # 2. 读取与解析输入 JSON
+    # 1. 读取与解析输入 JSON
+    raw_data = None
     if args.json_input:
         if os.path.isfile(args.json_input):
             try:
@@ -639,6 +714,25 @@ def main():
         else:
             parser.error("必须通过 --json 或标准输入传入词汇清单 JSON")
 
+    # 2. 若为仅校验模式 (--validate-only)，无需 Token，直接输出校验结果
+    if args.validate_only:
+        try:
+            deduped_dicts, _, duplicates, truncated, invalid = normalize_vocab_entries(raw_data)
+        except Exception as e:
+            print(f"[ERROR] 词汇清单格式错误: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        fmt = args.output_format or "check"
+        print(format_validation_report(deduped_dicts, duplicates, truncated, invalid, output_format=fmt))
+        sys.exit(0)
+
+    # 3. 检查并获取 Token
+    token = args.token or os.environ.get("MAIMEMOTOKEN") or os.environ.get("MAIMEMO_TOKEN")
+    if not token:
+        print("[ERROR] 缺少墨墨背单词 API Token。请在环境变量中设置 MAIMEMOTOKEN 或通过 --token 参数传入。", file=sys.stderr)
+        sys.exit(1)
+
+    # 4. 解析与归一化词汇
     try:
         terms = parse_input_vocab(raw_data)
     except Exception as e:
@@ -649,29 +743,30 @@ def main():
         print("[WARNING] 输入词汇列表为空，无词条需要导入。", file=sys.stderr)
         sys.exit(0)
 
-    # 3. 词汇查询与短语拆分兜底
+    # 5. 词汇查询与短语拆分兜底
     try:
         direct_matches, phrase_splits, split_matches, unrecognized, phrase_stopwords = resolve_vocabularies(terms, token)
     except MaiMemoAPIError as e:
         print(f"[ERROR] 墨墨词汇解析失败: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # 4. 学习记录状态分流与写入
+    # 6. 学习记录状态分流与写入
     try:
         result = partition_and_import(direct_matches, phrase_splits, split_matches, token, dry_run=args.dry_run)
     except MaiMemoAPIError as e:
         print(f"[ERROR] 墨墨学习记录分流/写入失败: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # 5. 输出报告
-    if args.output_format == "json":
+    # 7. 输出报告
+    out_fmt = args.output_format or "text"
+    if out_fmt == "json":
         report = format_report_json(direct_matches, phrase_splits, split_matches, unrecognized, result, args.dry_run, phrase_stopwords)
     else:
         report = format_report_text(direct_matches, phrase_splits, split_matches, unrecognized, result, args.dry_run, phrase_stopwords)
 
     print(report)
 
-    # 6. 自动清理临时输入文件（仅正式导入成功时；dry-run 与 --keep-json 例外）
+    # 8. 自动清理临时输入文件（仅正式导入成功时；dry-run 与 --keep-json 例外）
     if (not args.dry_run and not args.keep_json
             and args.json_input and os.path.isfile(args.json_input)):
         if cleanup_input_file(args.json_input):
