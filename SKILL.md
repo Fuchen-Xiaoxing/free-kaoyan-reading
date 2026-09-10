@@ -16,7 +16,7 @@ description: 考研英语阅读一对一私教，按固定方法论、固定节�
 
 ## 依赖说明
 
-- **词汇管理**：通过 `scripts/memo_import.py` 自动化调用墨墨背单词 Open API（Token 从环境变量 `MAIMEMOTOKEN` 或 `MAIMEMO_TOKEN` 读取），实现词条批量解析、短语拆分兜底（自动过滤 the / of / to 等虚词，不污染学习队列）、新词待背与旧词提前复习自动分流；导入成功后自动清理输入 JSON 临时文件。
+- **词汇管理**：通过 `scripts/memo_import.py` 自动化调用墨墨背单词 Open API（Token 从环境变量 `MAIMEMOTOKEN` 或 `MAIMEMO_TOKEN` 读取），实现词条批量解析、短语收录精准查询与未收录时核心词提取（自动过滤虚词与基础伴随词，不污染学习队列）、新词待背与旧词提前复习自动分流；导入成功后自动清理输入 JSON 临时文件。
 - **错题存储**：`错题本.md` 采用安全持久化存储机制，在 Android（如 Open Minis）环境下默认优先写入已挂载的外部文档目录（如 `/var/minis/mounts/Documents/考研英语/错题本.md`）或系统公共文档目录（`/storage/emulated/0/Documents/考研英语/错题本.md`，支持 Obsidian、WPS 或系统文件管理器随时查阅；未挂载时自动保存在沙箱 `/var/minis/workspace/错题本.md`），彻底与 Skill 代码解耦，更新/重装 Skill 绝不丢失历史错题。
 
 ## 开工必读（按意图分支加载）
@@ -147,5 +147,5 @@ description: 考研英语阅读一对一私教，按固定方法论、固定节�
 | `references/sentence-advanced/non-finite.md` | 遇到非谓语动词疑难（doing / done / to do / with） | 按需读取对应章节或 grep 定点检索 |
 | `references/sentence-advanced/clauses.md` | 遇到从句四象限决策、that 省略、同位语从句辨析 | 按需读取对应章节或 grep 定点检索 |
 | `references/sentence-advanced/special-patterns.md` | 遇到 It 句型 / FANBOYS / 比较 / as / 虚拟语气等特殊结构 | 按需读取对应章节或 grep 定点检索 |
-| `references/error-log-format.md` | 阶段 3 错题归档调用脚本前确认 12 类错误与条目 Schema | 定向查阅 12 类错误封闭枚举与 YAML Schema |
+| `references/error-log-format.md` | 阶段 3 错题归档调用脚本前确认 13 类错误与条目 Schema | 定向查阅 13 类错误封闭枚举与 YAML Schema |
 | `references/script-contracts.md` | 阶段 3 调用脚本（错题归档 / 墨墨导入）前 | 按需读取，直接按契约构造 JSON 与命令行，严禁查看 scripts/ 源码 |

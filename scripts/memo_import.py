@@ -142,8 +142,11 @@ def normalize_vocab_entries(raw_input) -> tuple:
         elif isinstance(item, dict):
             raw_word = item.get("word", item.get("term", item.get("单词", item.get("词组", ""))))
             term = raw_word.strip() if isinstance(raw_word, str) else ""
+            raw_kw = item.get("keyword", item.get("core_keyword", item.get("关键词", "")))
+            kw_str = raw_kw.strip() if isinstance(raw_kw, str) else ""
             dict_item = {
                 "word": term,
+                "keyword": kw_str,
                 "meaning": (item.get("meaning", item.get("definition", item.get("释义", item.get("文中释义", "")))) or "").strip(),
                 "tone": (item.get("tone", item.get("attitude", item.get("态度", item.get("态度色彩", "")))) or "").strip(),
                 "source": (item.get("source", item.get("origin", item.get("出处", ""))) or "").strip(),
@@ -174,14 +177,19 @@ def normalize_vocab_entries(raw_input) -> tuple:
     return deduped_dicts, deduped_terms, duplicates, truncated, invalid
 
 
-def parse_input_vocab(raw_input) -> list:
+def parse_input_vocab(raw_input) -> tuple:
     """
     解析并提取词汇清单列表（去重并截断至 MAX_VOCAB_LIMIT）
+    返回: (terms, term_keywords_map)
     """
-    _, terms, _, truncated, _ = normalize_vocab_entries(raw_input)
+    deduped_dicts, terms, _, truncated, _ = normalize_vocab_entries(raw_input)
     if truncated:
         print(f"[WARNING] 词汇数量超过最大限制 ({MAX_VOCAB_LIMIT})，已自动截断保留前 {MAX_VOCAB_LIMIT} 个词条。", file=sys.stderr)
-    return terms
+    term_keywords = {}
+    for d in deduped_dicts:
+        if d.get("keyword"):
+            term_keywords[d["word"].lower()] = d["keyword"].strip()
+    return terms, term_keywords
 
 
 def format_validation_report(deduped_dicts, duplicates, truncated, invalid, output_format="check") -> str:
@@ -250,6 +258,76 @@ def split_phrase_into_words(phrase: str) -> tuple:
     return cleaned, skipped
 
 
+def extract_core_keyword(phrase: str, explicit_keyword: str = "") -> tuple:
+    """
+    从短语中提取核心关键词。
+    返回: (核心关键词, 跳过的伴随词列表, 跳过的虚词列表)
+    提取规则:
+    1. 若提供了 explicit_keyword，直接以其为核心关键词；
+    2. 否则进行分词并剔除 PHRASE_STOPWORDS 虚词；
+    3. 若剩余 1 个词，则为核心关键词；
+    4. 若剩余多个词：
+       - 优先排除泛指代词/名词弱实词（people, person, man, men, woman, women, thing, things, time, day, way）；
+       - 其次排除通用程度/泛化形容词（big, small, good, bad, great, high, low, general）；
+       - 剩余词通常即为题眼核心实义词（如 regular people -> regular；big jump -> jump；general direction -> direction）；
+       - 若仍有多个词，默认取最后一个实义词（中心词，如 office speak -> speak）。
+    """
+    words = re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", phrase)
+    if explicit_keyword and explicit_keyword.strip():
+        kw = explicit_keyword.strip()
+        skipped_stopwords = [w for w in words if w.lower() in PHRASE_STOPWORDS]
+        skipped_companions = [w for w in words if w.lower() not in PHRASE_STOPWORDS and w.lower() != kw.lower()]
+        return kw, skipped_companions, skipped_stopwords
+
+    cleaned = []
+    skipped_stopwords = []
+    seen = set()
+    for w in words:
+        w_clean = w.strip()
+        if not w_clean:
+            continue
+        w_key = w_clean.lower()
+        if w_key in seen:
+            continue
+        seen.add(w_key)
+        if w_key in PHRASE_STOPWORDS:
+            skipped_stopwords.append(w_clean)
+        else:
+            cleaned.append(w_clean)
+
+    if not cleaned:
+        return "", [], skipped_stopwords
+
+    if len(cleaned) == 1:
+        return cleaned[0], [], skipped_stopwords
+
+    SUPER_GENERIC_NOUNS = {"people", "person", "man", "men", "woman", "women", "thing", "things", "time", "day", "way"}
+    SUPER_GENERIC_ADJS = {"big", "small", "good", "bad", "great", "high", "low", "general"}
+
+    # 1. 排除泛指代词/名词
+    non_generic_nouns = [w for w in cleaned if w.lower() not in SUPER_GENERIC_NOUNS]
+    if len(non_generic_nouns) == 1:
+        chosen = non_generic_nouns[0]
+        companions = [w for w in cleaned if w.lower() != chosen.lower()]
+        return chosen, companions, skipped_stopwords
+
+    # 2. 进一步排除纯程度形容词
+    candidates = non_generic_nouns if non_generic_nouns else cleaned
+    non_generic_adjs = [w for w in candidates if w.lower() not in SUPER_GENERIC_ADJS]
+    if len(non_generic_adjs) == 1:
+        chosen = non_generic_adjs[0]
+        companions = [w for w in cleaned if w.lower() != chosen.lower()]
+        return chosen, companions, skipped_stopwords
+
+    if non_generic_adjs:
+        chosen = non_generic_adjs[-1]
+    else:
+        chosen = cleaned[-1]
+
+    companions = [w for w in cleaned if w.lower() != chosen.lower()]
+    return chosen, companions, skipped_stopwords
+
+
 def get_lemma_candidates(word: str) -> list:
     """
     针对直接查询未命中的词条，生成基于规则的后缀还原候选（复数 -s/-es、过去分词 -ed、分词 -ing）。
@@ -301,24 +379,27 @@ def get_lemma_candidates(word: str) -> list:
     return candidates
 
 
-def resolve_vocabularies(terms: list, token: str) -> tuple:
+def resolve_vocabularies(terms: list, token: str, term_keywords: dict = None) -> tuple:
     """
-    批量查询词汇 ID，包含整词查询、短语拆分兜底与基于规则的后缀还原原型查询
+    批量查询词汇 ID，优先查询整词/词组，未收录词组自动提取核心关键词二次查询
     返回:
       direct_matches: {term: voc_id}
-      phrase_splits: {phrase: [word1, word2, ...]}
-      split_matches: {word: voc_id}
-      unrecognized: [unmatched_single_words or failed_split_words]
+      phrase_splits: {phrase: [keyword]}
+      split_matches: {keyword: voc_id}
+      unrecognized: [unmatched_single_words or failed_keywords]
       phrase_stopwords: {phrase: [skipped_stopword1, ...]} 拆分时跳过的虚词
+      phrase_companions: {phrase: [skipped_companion1, ...]} 拆分时跳过的伴随词
     """
     direct_matches = {}
     phrase_splits = {}
     split_matches = {}
     unrecognized = []
     phrase_stopwords = {}
+    phrase_companions = {}
+    term_keywords = term_keywords or {}
 
     if not terms:
-        return direct_matches, phrase_splits, split_matches, unrecognized, phrase_stopwords
+        return direct_matches, phrase_splits, split_matches, unrecognized, phrase_stopwords, phrase_companions
 
     # 1. 批量查询第一批（所有原形词条，包含整句短语）
     # 同时提交原形和全小写以提升命中率
@@ -344,37 +425,39 @@ def resolve_vocabularies(terms: list, token: str) -> tuple:
         else:
             unmatched_terms.append(t)
 
-    # 2. 对未命中的词条进行分类：是短语则拆分（过滤虚词），是单字则暂归入无法识别
+    # 2. 对未命中的词条进行分类：是短语则提取核心关键词，是单字则暂归入无法识别
     words_to_query = set()
     for t in unmatched_terms:
-        words, skipped = split_phrase_into_words(t)
         raw_token_count = len(re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", t))
         if raw_token_count > 1:
+            explicit_kw = term_keywords.get(t.lower(), "")
+            kw, companions, skipped = extract_core_keyword(t, explicit_keyword=explicit_kw)
             if skipped:
                 phrase_stopwords[t] = skipped
-            if not words:
-                # 词组全部由虚词构成，无实义词可查，整条跳过
+            if companions:
+                phrase_companions[t] = companions
+            if not kw:
+                # 词组全部由虚词构成，无核心实义词可查，整条跳过
                 continue
-            phrase_splits[t] = words
-            for w in words:
-                w_key = w.lower()
-                if w_key in lookup_map:
-                    split_matches[w] = lookup_map[w_key][0]
-                else:
-                    words_to_query.add(w)
-                    if w.lower() != w:
-                        words_to_query.add(w.lower())
+            phrase_splits[t] = [kw]
+            kw_key = kw.lower()
+            if kw_key in lookup_map:
+                split_matches[kw] = lookup_map[kw_key][0]
+            else:
+                words_to_query.add(kw)
+                if kw.lower() != kw:
+                    words_to_query.add(kw.lower())
         else:
             unrecognized.append(t)
 
-    # 3. 针对未在之前查询中命中的拆分单词进行二次查询
+    # 3. 针对未在之前查询中命中的核心关键词进行二次查询
     if words_to_query:
         res_split = make_api_request("/vocabulary/query", {"spellings": list(words_to_query)}, token=token)
         split_voc_list = res_split.get("data", {}).get("voc", [])
         for item in split_voc_list:
             lookup_map[item["spelling"].lower()] = (item["id"], item["spelling"])
 
-        # 检查拆分单词是否全部解析
+        # 检查核心关键词是否全部解析
         for phrase, words in phrase_splits.items():
             for w in words:
                 w_key = w.lower()
@@ -419,7 +502,7 @@ def resolve_vocabularies(terms: list, token: str) -> tuple:
                         split_matches[u] = vid
                 break
 
-    return direct_matches, phrase_splits, split_matches, unrecognized, phrase_stopwords
+    return direct_matches, phrase_splits, split_matches, unrecognized, phrase_stopwords, phrase_companions
 
 
 
@@ -485,11 +568,12 @@ def partition_and_import(direct_matches: dict, phrase_splits: dict, split_matche
 
 def format_report_text(direct_matches: dict, phrase_splits: dict, split_matches: dict, 
                        unrecognized: list, result: dict, dry_run: bool,
-                       phrase_stopwords: dict = None) -> str:
+                       phrase_stopwords: dict = None, phrase_companions: dict = None) -> str:
     """
     格式化生成清晰的控制台 Markdown/文本分类报告
     """
     phrase_stopwords = phrase_stopwords or {}
+    phrase_companions = phrase_companions or {}
     new_add_vids = result["new_add_voc_ids"]
     advance_vids = result["advance_voc_ids"]
 
@@ -502,7 +586,7 @@ def format_report_text(direct_matches: dict, phrase_splits: dict, split_matches:
         elif vid in advance_vids:
             direct_advance.append(term)
 
-    # 分类拆分出来的词条（去重汇总）
+    # 分类核心关键词词条（去重汇总）
     split_new = []
     split_advance = []
     for word, vid in split_matches.items():
@@ -527,7 +611,7 @@ def format_report_text(direct_matches: dict, phrase_splits: dict, split_matches:
             lines.append(f"  • {t}")
     if split_new:
         for w in split_new:
-            lines.append(f"  • {w} (来自词组拆分)")
+            lines.append(f"  • {w} (来自词组核心词)")
     if total_new == 0:
         lines.append("  (无)")
 
@@ -539,13 +623,13 @@ def format_report_text(direct_matches: dict, phrase_splits: dict, split_matches:
             lines.append(f"  • {t}")
     if split_advance:
         for w in split_advance:
-            lines.append(f"  • {w} (来自词组拆分)")
+            lines.append(f"  • {w} (来自词组核心词)")
     if total_advance == 0:
         lines.append("  (无)")
 
-    # 3. 词组拆分明细
+    # 3. 词组核心关键词提取明细
     if phrase_splits:
-        lines.append(f"\n✂️ 词组拆出的单词 ({len(phrase_splits)} 个词组):")
+        lines.append(f"\n✂️ 未整词收录的词组 → 提取核心关键词 ({len(phrase_splits)} 个词组):")
         for phrase, words in phrase_splits.items():
             breakdowns = []
             for w in words:
@@ -557,10 +641,13 @@ def format_report_text(direct_matches: dict, phrase_splits: dict, split_matches:
                 else:
                     st = "未识别"
                 breakdowns.append(f"{w} [{st}]")
-            suffix = ""
-            if phrase in phrase_stopwords:
-                suffix = f"（已跳过虚词: {', '.join(phrase_stopwords[phrase])}）"
-            lines.append(f"  • \"{phrase}\" (未整句收录) → 拆分解析: {', '.join(breakdowns)}{suffix}")
+            skipped_notes = []
+            if phrase in phrase_companions and phrase_companions[phrase]:
+                skipped_notes.append(f"跳过伴随词: {', '.join(phrase_companions[phrase])}")
+            if phrase in phrase_stopwords and phrase_stopwords[phrase]:
+                skipped_notes.append(f"跳过虚词: {', '.join(phrase_stopwords[phrase])}")
+            suffix = f" （已{'; '.join(skipped_notes)}）" if skipped_notes else ""
+            lines.append(f"  • \"{phrase}\" (未整句收录) → 核心词: {', '.join(breakdowns)}{suffix}")
 
     # 3.5 全虚词词组（无实义词，整条跳过）
     all_stopword_phrases = [p for p in phrase_stopwords if p not in phrase_splits]
@@ -578,9 +665,9 @@ def format_report_text(direct_matches: dict, phrase_splits: dict, split_matches:
         lines.append("  (无)")
 
     # 汇总条
-    skipped_count = sum(len(v) for v in phrase_stopwords.values())
+    skipped_count = sum(len(v) for v in phrase_stopwords.values()) + sum(len(v) for v in phrase_companions.values())
     lines.append("\n" + "-" * 46)
-    lines.append(f"📊 汇总统计: 新加待背 {total_new} | 提前复习 {total_advance} | 拆分词组 {len(phrase_splits)} | 跳过虚词 {skipped_count} | 无法识别 {len(unrecognized)}")
+    lines.append(f"📊 汇总统计: 新加待背 {total_new} | 提前复习 {total_advance} | 词组提取核心词 {len(phrase_splits)} | 跳过虚词/伴随词 {skipped_count} | 无法识别 {len(unrecognized)}")
     lines.append("=" * 46)
 
     return "\n".join(lines)
@@ -588,11 +675,12 @@ def format_report_text(direct_matches: dict, phrase_splits: dict, split_matches:
 
 def format_report_json(direct_matches: dict, phrase_splits: dict, split_matches: dict, 
                        unrecognized: list, result: dict, dry_run: bool,
-                       phrase_stopwords: dict = None) -> str:
+                       phrase_stopwords: dict = None, phrase_companions: dict = None) -> str:
     """
     格式化生成 JSON 结构化分类报告
     """
     phrase_stopwords = phrase_stopwords or {}
+    phrase_companions = phrase_companions or {}
     new_add_vids = result["new_add_voc_ids"]
     advance_vids = result["advance_voc_ids"]
 
@@ -616,6 +704,8 @@ def format_report_json(direct_matches: dict, phrase_splits: dict, split_matches:
         entry = {"phrase": phrase, "words": w_list}
         if phrase in phrase_stopwords:
             entry["skipped_stopwords"] = phrase_stopwords[phrase]
+        if phrase in phrase_companions:
+            entry["skipped_companions"] = phrase_companions[phrase]
         phrase_detail.append(entry)
 
     all_stopword_phrases = [p for p in phrase_stopwords if p not in phrase_splits]
@@ -627,6 +717,7 @@ def format_report_json(direct_matches: dict, phrase_splits: dict, split_matches:
             "advance_review_count": len(direct_advance) + len(split_advance),
             "phrase_splits_count": len(phrase_splits),
             "skipped_stopwords_count": sum(len(v) for v in phrase_stopwords.values()),
+            "skipped_companions_count": sum(len(v) for v in phrase_companions.values()),
             "unrecognized_count": len(unrecognized)
         },
         "new_added": {
@@ -674,6 +765,7 @@ def cleanup_input_file(path: str) -> bool:
 def main():
     parser = argparse.ArgumentParser(description="考研英语篇末核心词汇校验与墨墨背单词自动化导入工具")
     parser.add_argument("--json", dest="json_input", help="词汇清单 JSON 字符串或文件路径")
+    parser.add_argument("--query", dest="query_terms", help="直接调用墨墨接口查询指定单词或词组（逗号分隔）的收录状态与关键词解析")
     parser.add_argument("--token", dest="token", help="墨墨 API Token (若不指定则读取 MAIMEMOTOKEN 或 MAIMEMO_TOKEN 环境变量)")
     parser.add_argument("--validate-only", dest="validate_only", action="store_true", help="仅执行词汇去重、上限截断与格式校验，不请求墨墨 API")
     parser.add_argument("--dry-run", dest="dry_run", action="store_true", help="预览模式，仅查询与分流，不执行写入操作")
@@ -682,6 +774,33 @@ def main():
     parser.add_argument("--keep-json", dest="keep_json", action="store_true", help="导入成功后保留输入 JSON 文件（默认自动删除临时输入文件及其变空的父目录）")
 
     args = parser.parse_args()
+
+    # 0. 若为单独查询模式 (--query)，直接调用接口并返回收录状态
+    if args.query_terms:
+        token = args.token or os.environ.get("MAIMEMOTOKEN") or os.environ.get("MAIMEMO_TOKEN")
+        if not token:
+            print("[ERROR] 缺少墨墨背单词 API Token。请在环境变量中设置 MAIMEMOTOKEN 或通过 --token 参数传入。", file=sys.stderr)
+            sys.exit(1)
+        query_list = [t.strip() for t in re.split(r"[,，\n]", args.query_terms) if t.strip()]
+        if not query_list:
+            print("[ERROR] 请指定要查询的词条。", file=sys.stderr)
+            sys.exit(1)
+        direct_matches, phrase_splits, split_matches, unrecognized, phrase_stopwords, phrase_companions = resolve_vocabularies(query_list, token)
+        print("=" * 46)
+        print("🔍 墨墨词汇/词组收录状态与核心关键词查询")
+        print("=" * 46)
+        for q in query_list:
+            if q in direct_matches:
+                print(f"  • {q}: ✅ 整词已收录 (voc_id: {direct_matches[q]})")
+            elif q in phrase_splits:
+                kw = phrase_splits[q][0] if phrase_splits[q] else ""
+                vid = split_matches.get(kw, "未找到")
+                comp_info = f", 跳过伴随词: {', '.join(phrase_companions.get(q, []))}" if phrase_companions.get(q) else ""
+                stop_info = f", 跳过虚词: {', '.join(phrase_stopwords.get(q, []))}" if phrase_stopwords.get(q) else ""
+                print(f"  • {q}: ✂️ 未整词收录 → 提取核心关键词: {kw} (voc_id: {vid}{comp_info}{stop_info})")
+            else:
+                print(f"  • {q}: ❌ 未收录/无法识别")
+        sys.exit(0)
 
     # 1. 读取与解析输入 JSON
     raw_data = None
@@ -712,7 +831,7 @@ def main():
                 print("[ERROR] 未检测到标准输入内容，请通过 --json 或标准输入传入词汇清单 JSON。", file=sys.stderr)
                 sys.exit(1)
         else:
-            parser.error("必须通过 --json 或标准输入传入词汇清单 JSON")
+            parser.error("必须通过 --json、--query 或标准输入传入词汇清单")
 
     # 2. 若为仅校验模式 (--validate-only)，无需 Token，直接输出校验结果
     if args.validate_only:
@@ -734,7 +853,7 @@ def main():
 
     # 4. 解析与归一化词汇
     try:
-        terms = parse_input_vocab(raw_data)
+        terms, term_keywords = parse_input_vocab(raw_data)
     except Exception as e:
         print(f"[ERROR] 词汇清单格式错误: {e}", file=sys.stderr)
         sys.exit(1)
@@ -745,7 +864,7 @@ def main():
 
     # 5. 词汇查询与短语拆分兜底
     try:
-        direct_matches, phrase_splits, split_matches, unrecognized, phrase_stopwords = resolve_vocabularies(terms, token)
+        direct_matches, phrase_splits, split_matches, unrecognized, phrase_stopwords, phrase_companions = resolve_vocabularies(terms, token, term_keywords=term_keywords)
     except MaiMemoAPIError as e:
         print(f"[ERROR] 墨墨词汇解析失败: {e}", file=sys.stderr)
         sys.exit(1)
@@ -760,9 +879,9 @@ def main():
     # 7. 输出报告
     out_fmt = args.output_format or "text"
     if out_fmt == "json":
-        report = format_report_json(direct_matches, phrase_splits, split_matches, unrecognized, result, args.dry_run, phrase_stopwords)
+        report = format_report_json(direct_matches, phrase_splits, split_matches, unrecognized, result, args.dry_run, phrase_stopwords, phrase_companions)
     else:
-        report = format_report_text(direct_matches, phrase_splits, split_matches, unrecognized, result, args.dry_run, phrase_stopwords)
+        report = format_report_text(direct_matches, phrase_splits, split_matches, unrecognized, result, args.dry_run, phrase_stopwords, phrase_companions)
 
     print(report)
 

@@ -20,7 +20,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
     except Exception:
         pass
 
-# 12 类错误类型封闭枚举
+# 13 类错误类型封闭枚举
 ERROR_TYPES = [
     "定位错误",
     "无对应内容",
@@ -33,7 +33,8 @@ ERROR_TYPES = [
     "审题不清",
     "比较/时态偷换",
     "词义误解",
-    "长难句误读"
+    "长难句误读",
+    "选项误读"
 ]
 
 # 能力短板封闭集合
@@ -247,6 +248,19 @@ def get_existing_ids(file_path):
                 ids.add(m.group(1).strip())
     return ids
 
+def normalize_standard_id(raw_id: str) -> str:
+    """
+    规范标准 ID 命名规则: YYYY-T[1-4]-Q[21-40]
+    自动纠偏 '2015-英二T4-Q38', '2015-II-T4-Q38', '2015-T4-38', '2015-Text4-Q38' 等格式
+    """
+    if not raw_id:
+        return "UNKNOWN-T0-Q0"
+    raw_id = raw_id.strip()
+    m = re.search(r"(\d{4}).*?T?([1-4]).*?Q?([2-4]\d)", raw_id, re.IGNORECASE)
+    if m:
+        return f"{m.group(1)}-T{m.group(2)}-Q{m.group(3)}"
+    return raw_id
+
 def generate_unique_id(base_id, existing_ids):
     if base_id not in existing_ids:
         return base_id
@@ -267,7 +281,7 @@ def format_error_entry(data, existing_ids):
     # 校验错误类型（支持多种常见别名）
     error_type = _get_field(data, ["error_type", "error", "type_of_error", "错误类型"])
     if error_type not in ERROR_TYPES:
-        print(f"[ERROR] 非法错误类型: '{error_type}'。必须严格属于 12 类封闭枚举之一：\n{', '.join(ERROR_TYPES)}", file=sys.stderr)
+        print(f"[ERROR] 非法错误类型: '{error_type}'。必须严格属于 13 类封闭枚举之一：\n{', '.join(ERROR_TYPES)}", file=sys.stderr)
         sys.exit(1)
 
     # 校验能力短板（支持多种常见别名）
@@ -276,9 +290,28 @@ def format_error_entry(data, existing_ids):
         print(f"[ERROR] 非法能力短板: '{shortboard}'。必须属于 {ABILITY_SHORTBOARDS} 之一", file=sys.stderr)
         sys.exit(1)
 
-    base_id = _get_field(data, ["id", "ID", "item_id"], "UNKNOWN-Q0")
+    base_id = _get_field(data, ["id", "ID", "item_id"], "UNKNOWN-T0-Q0")
+    base_id = normalize_standard_id(base_id)
     entry_id = generate_unique_id(base_id, existing_ids)
     existing_ids.add(entry_id)
+
+    # 刷次标签（默认“一刷”）
+    round_val = _get_field(data, ["round", "刷次", "review_round", "round_tag"], "一刷")
+
+    # 用户选项与正确选项（可选）
+    user_answer = _get_field(data, ["user_answer", "user_choice", "my_answer", "用户选项"])
+    correct_answer = _get_field(data, ["correct_answer", "answer", "standard_answer", "正确答案"])
+
+    # secondary_error_types（副错误类型列表，可选）
+    sec_errs_raw = data.get("secondary_error_types") or data.get("secondary_errors") or data.get("副错误类型") or []
+    if isinstance(sec_errs_raw, str):
+        sec_errs_raw = [s.strip() for s in re.split(r"[,，、]", sec_errs_raw) if s.strip()]
+    valid_sec_errors = []
+    if isinstance(sec_errs_raw, list):
+        for se in sec_errs_raw:
+            se_str = str(se).strip()
+            if se_str in ERROR_TYPES and se_str != error_type and se_str not in valid_sec_errors:
+                valid_sec_errors.append(se_str)
 
     q_type = _get_field(data, ["question_type", "type", "q_type", "题型"], "细节题")
     keyword = _get_field(data, ["keyword", "keywords", "key", "解题关键词"])
@@ -290,18 +323,32 @@ def format_error_entry(data, existing_ids):
     if not analysis:
         analysis = f"错误还原：{restore}\n方法论归因：{attribution}\n教训金句：{lesson}"
 
+    frontmatter_lines = [
+        "---",
+        f"id: {entry_id}",
+        f"刷次: {round_val}",
+        f"题型: {q_type}",
+        f"error_type: {error_type}",
+    ]
+    if valid_sec_errors:
+        frontmatter_lines.append(f"secondary_error_types: [{', '.join(valid_sec_errors)}]")
+    if user_answer:
+        frontmatter_lines.append(f"user_answer: {user_answer}")
+    if correct_answer:
+        frontmatter_lines.append(f"correct_answer: {correct_answer}")
+    frontmatter_lines.extend([
+        f"能力短板: {shortboard}",
+        f"解题关键词: {keyword}",
+        f"原文定位: {location}",
+        f"错误还原: {restore}",
+        f"方法论归因: {attribution}",
+        f"教训金句: {lesson}",
+        "---"
+    ])
+    fm_block = "\n".join(frontmatter_lines)
+
     entry_content = f"""
----
-id: {entry_id}
-题型: {q_type}
-error_type: {error_type}
-能力短板: {shortboard}
-解题关键词: {keyword}
-原文定位: {location}
-错误还原: {restore}
-方法论归因: {attribution}
-教训金句: {lesson}
----
+{fm_block}
 
 ### {entry_id}
 

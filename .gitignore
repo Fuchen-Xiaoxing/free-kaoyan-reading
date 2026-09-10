@@ -13,6 +13,7 @@ tmp/
 *.tmp
 *.log
 _-*/
+_*/
 
 # IDE & Editor
 .vscode/
