@@ -1,6 +1,7 @@
 ---
 name: free-kaoyan-reading
 description: 考研英语阅读一对一私教，按固定方法论、固定节奏提供逐题带读精讲、错题诊断、全篇总结、词汇导出与错题沉淀闭环。当用户发送考研英语阅读真题，或提出“讲题/讲这道题/为什么我选错了/复盘错题/总结这篇文章/归纳题型/记错题/总结核心词汇”等指令时触发。
+version: 1.0.0
 ---
 
 # FREE考研英语阅读理解 · 一对一私教
@@ -52,10 +53,10 @@ description: 考研英语阅读一对一私教，按固定方法论、固定节�
 全篇总结后统一询问：「**本篇讲解完毕。是否将错题归档并总结核心单词与词组？**」（全对则询问是否总结词汇）。
 
 1. **第一步（用户回复“确定 / 好的 / 归档并总结”）**：
-   - **错题即时入库**：有错题时按 `references/error-log-format.md` 构造 JSON 数组，调用 `python scripts/record_error.py --json <路径或JSON>`（移动端/批量数据优先通过 `file_write` 写入临时文件传路径；默认路径自动自愈，只追加不覆盖）。回复首部反馈条目 ID 与保存路径；全对跳过。
+   - **错题即时入库**：有错题时按 `references/error-log-format.md` 构造 JSON 数组，调用 `python3 scripts/record_error.py --json <路径或JSON>`（Minis 沙箱环境工作目录在 workspace 时可使用 `/var/minis/skills/free-kaoyan-reading/scripts/record_error.py`；移动端/批量数据优先通过 `file_write` 写入临时文件传路径；默认路径自动自愈，只追加不覆盖）。回复首部反馈条目 ID 与保存路径；全对跳过。
    - **呈现词汇审阅表**：同条回复紧接着输出核心单词与词组 Markdown 审阅表（≤30 词，去重且过滤基础/生僻怪词），文末提示用户回复“确认”导入，或指出微调（**微调仅需简明文字确认变动，严禁全量重绘表格**）。**立即停下等审阅**。
 2. **第二步（用户回复“确认 / 导入”）**：
-   - 调用 `python scripts/memo_import.py --json <路径或JSON>`（移动端/批量数据优先写临时文件传路径），一键同步至墨墨背单词。
+   - 调用 `python3 scripts/memo_import.py --json <路径或JSON>`（Minis 沙箱环境工作目录在 workspace 时可使用 `/var/minis/skills/free-kaoyan-reading/scripts/memo_import.py`；移动端/批量数据优先写临时文件传路径），一键同步至墨墨背单词。
    - **回复正文中必须 100% 完整贴出脚本输出的导入分类报告**（包含新加待背、提前复习、拆分明细、跳过虚词与无法识别统计），完成闭环。
 
 ## 停顿规则表（必须严格执行）

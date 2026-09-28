@@ -12,7 +12,7 @@
 
 ## 1. 错题本批量归档：`scripts/record_error.py`
 
-- **命令格式**：`python scripts/record_error.py [--file <路径>] [--info] --json <JSON字符串或文件路径> [--keep-json]`（亦支持 stdin 管道输入，**建议省略 `--file` 走默认安全持久化路径**）
+- **命令格式**：`python3 scripts/record_error.py [--file <路径>] [--info] --json <JSON字符串或文件路径> [--keep-json]`（亦支持 stdin 管道输入，**建议省略 `--file` 走默认安全持久化路径**；Minis 沙箱环境工作目录在 workspace 时可使用绝对路径 `/var/minis/skills/free-kaoyan-reading/scripts/record_error.py`）
 - **功能特性**：
   - **安全持久化与路径自愈**：`--file` 参数可选（传入目录或 `.md` 时自动自愈为 `考研英语/错题本.md`）。在 Open Minis / Android PRoot 环境下，默认优先探测已挂载的外部文档目录（`/var/minis/mounts/Documents/考研英语/错题本.md`）或系统公共文档目录（`/storage/emulated/0/Documents/考研英语/错题本.md`），支持 Obsidian、WPS 或自带文件管理器直接查阅；若未挂载则安全保存在 `/var/minis/workspace/错题本.md`；支持环境变量 `KAOYAN_ERROR_NOTEBOOK` 自定义路径；
   - **存储状态诊断**：支持 `--info` / `--status` 快速查看当前解析到的错题本路径、可写性与已存错题数量；
@@ -49,7 +49,7 @@
 
 ## 2. 核心词汇校验与墨墨背单词一键导入：`scripts/memo_import.py`
 
-- **命令格式**：`python scripts/memo_import.py --json <JSON字符串或文件路径> [--validate-only] [--dry-run] [--query <词条>] [--format text|json|markdown] [--keep-json]`（亦支持 stdin 管道输入）
+- **命令格式**：`python3 scripts/memo_import.py --json <JSON字符串或文件路径> [--validate-only] [--dry-run] [--query <词条>] [--format text|json|markdown] [--keep-json]`（亦支持 stdin 管道输入；Minis 沙箱环境工作目录在 workspace 时可使用绝对路径 `/var/minis/skills/free-kaoyan-reading/scripts/memo_import.py`）
 - **Token 机制**：自动从环境变量 `MAIMEMOTOKEN` 或 `MAIMEMO_TOKEN` 读取，无需显式传 `--token`。
 - **功能特性**：
   - **一体化词汇校验**：自动字段归一化、忽略大小写去重、强制 ≤30 个词条截断保护；`--validate-only` 模式仅进行去重校验与截断，不发起网络请求；`--query <词条>` 快速检测单词/词组在墨墨平台的收录状态；
